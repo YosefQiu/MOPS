@@ -1,0 +1,90 @@
+stream:
+  name: mpas
+  path_prefix: "/global/cfs/projectdirs/m4259/milena/forParticleTracing"
+  substreams:
+    - name: mesh
+      format: netcdf
+      filenames: "mpaso.RRSwISC6to18E3r5.rstFromG-chrysalis.20240603.nc"
+      static: true
+      vars:
+        - name: xCell
+        - name: yCell
+        - name: zCell
+        - name: xEdge
+        - name: yEdge
+        - name: zEdge
+        - name: xVertex
+        - name: yVertex
+        - name: zVertex
+        - name: indexToCellID
+        - name: indexToEdgeID
+        - name: indexToVertexID
+        - name: nEdgesOnCell
+        - name: nEdgesOnEdge
+        - name: cellsOnCell
+        - name: cellsOnEdge
+        - name: cellsOnVertex
+        - name: edgesOnVertex
+        - name: edgesOnCell
+        - name: edgesOnEdge
+        - name: verticesOnCell
+        - name: verticesOnEdge
+    - name: data
+      format: netcdf
+      filenames: "20240726.icFromLRGcase.GMPAS-JRA1p5.TL319_RRSwISC6to18E3r5.chicoma.mpaso.hist.am.timeSeriesStatsMonthly.0001-03-01.nc"
+      vars:
+        - name: xtime # the name will be the variable name in netCDF if possible_names is not given
+          possible_names: 
+            - xtime 
+            - xtime_startMonthly
+          dimensions: auto # by default auto
+          optional: false # by default false
+          multicomponents: true # if the inputs are not multicomponents, the resulting array will be made multicomponents
+        - name: timeMonthly_avg_normalVelocity
+          possible_names:
+            - normalVelocity
+            - timeMonthly_avg_normalVelocity
+          dimensions: auto
+          multicomponents: true
+        - name: timeMonthly_avg_velocityMeridional
+          possible_names:
+            - velocityMeridional
+            - timeMonthly_avg_velocityMeridional
+          multicomponents: true
+        - name: timeMonthly_avg_velocityZonal
+          possible_names:
+            - velocityZonal
+            - timeMonthly_avg_velocityZonal
+          multicomponents: true
+        - name: timeMonthly_avg_vertVelocityTop
+          possible_names:
+            - vertVelocityTop
+            - timeMonthly_avg_vertVelocityTop
+          multicomponents: true
+        - name: salinity
+          optional: true
+          multicomponents: true
+        - name: temperature
+          optional: true
+          multicomponents: true
+        - name: timeMonthly_avg_zTop
+          possible_names:
+            - zTop
+            - timeMonthly_avg_zTop
+          optional: true
+          multicomponents: true
+        - name: zMid
+          possible_names:
+            - zMid
+            - timeMonthly_avg_zMid
+          optional: true
+          multicomponents: true
+        - name: timeMonthly_avg_layerThickness
+          possible_names: 
+            - layerThickness
+            - timeMonthly_avg_layerThickness
+          optional: true
+          multicomponents: true
+        - name: bottomDepth
+          possibel_names:
+            - bottomDepth
