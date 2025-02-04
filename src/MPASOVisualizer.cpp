@@ -478,7 +478,7 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
                     double ztop_layer1, ztop_layer2;
                     ztop_layer1 = current_point_ztop_vec[layer];
                     ztop_layer2 = current_point_ztop_vec[layer - 1];
-                    double t = (sycl::abs(DEPTH) - sycl::abs(ztop_layer1)) / (sycl::abs(ztop_layer2) - sycl::abs(ztop_layer1));
+                    double t = (sycl::fabs(DEPTH) - sycl::fabs(ztop_layer1)) / (sycl::fabs(ztop_layer2) - sycl::fabs(ztop_layer1));
                     double current_point_ztop;
                     current_point_ztop = t * ztop_layer1 + (1 - t) * ztop_layer2;
 
@@ -681,7 +681,7 @@ void MPASOVisualizer::VisualizeFixedLatitude(MPASOField* mpasoF, VisualizationSe
             double ztop_layer1, ztop_layer2;
             ztop_layer1 = current_point_ztop_vec[layer];
             ztop_layer2 = current_point_ztop_vec[layer - 1];
-            double t = (sycl::abs(DEPTH) - sycl::abs(ztop_layer1)) / (sycl::abs(ztop_layer2) - sycl::abs(ztop_layer1));
+            double t = (sycl::fabs(DEPTH) - sycl::fabs(ztop_layer1)) / (sycl::fabs(ztop_layer2) - sycl::fabs(ztop_layer1));
             double current_point_ztop;
             current_point_ztop = t * ztop_layer1 + (1 - t) * ztop_layer2;
             //imgValue = { current_point_ztop , current_point_ztop , current_point_ztop };
@@ -1162,7 +1162,7 @@ std::vector<CartesianCoord>  MPASOVisualizer::VisualizeTrajectory(MPASOField* mp
                     double ztop_layer1, ztop_layer2;
                     ztop_layer1 = current_point_ztop_vec[layer];
                     ztop_layer2 = current_point_ztop_vec[layer - 1];
-                    double t = (sycl::abs(fixed_depth) - sycl::abs(ztop_layer1)) / (sycl::abs(ztop_layer2) - sycl::abs(ztop_layer1));
+                    double t = (sycl::fabs(fixed_depth) - sycl::fabs(ztop_layer1)) / (sycl::fabs(ztop_layer2) - sycl::fabs(ztop_layer1));
                     double current_point_ztop;
                     current_point_ztop = t * ztop_layer1 + (1 - t) * ztop_layer2;
                     //imgValue = { current_point_ztop , current_point_ztop , current_point_ztop };
