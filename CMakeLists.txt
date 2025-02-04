@@ -33,6 +33,7 @@ endif()
 # Find YAML-CPP
 find_package(yaml-cpp REQUIRED)
 # Find NDARRAY
+find_package (CUDAToolkit)
 find_package(ndarray REQUIRED)
 message(STATUS "ndarray found at: ${ndarray_DIR}")
 # Attempt to find NetCDF
@@ -66,6 +67,7 @@ message("Following files are compiled: ${SOURCE_FILES}")
 add_executable(${PROJECT_NAME} ${SOURCE_FILES})
 
 set(TARGET_LIBRARIES
+    CUDA::cudart
     ${ndarray_LIBRARIES}
     yaml-cpp::yaml-cpp
     ndarray::ndarray
