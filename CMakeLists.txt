@@ -34,11 +34,7 @@ endif()
 find_package(yaml-cpp REQUIRED)
 # Find NDARRAY
 find_package(ndarray REQUIRED)
-if(NDARRAY_FOUND)
-    message(STATUS "ndarray found at: ${NDARRAY_DIR}")
-else()
-    message(FATAL_ERROR "ndarray NOT FOUND!")
-endif()
+message(STATUS "ndarray found at: ${ndarray_DIR}")
 # Attempt to find NetCDF
 find_package(netCDF)
 if(NETCDF_FOUND)
