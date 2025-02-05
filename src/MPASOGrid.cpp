@@ -73,14 +73,15 @@ void MPASOGrid::createKDTree(const char* kdTree_path, sycl::queue& SYCL_Q)
         if (!f_out) throw std::runtime_error("Error writing index file!");
         mKDTree->index->saveIndex(f_out);
         Debug("[MPASOGrid]::Create KD Tree...");
-        Debug("[MPASOGrid]::Saved KD Tree in %s", kdTree_path);
+        Debug("[MPASOGrid]::Saved KD Tree in [ %s ]", kdTree_path);
     }
     else
     {
         // File exists and can be read, load the KD Tree
         mKDTree = std::make_unique<KDTree_t>(3, cellCoord_vec, 10, 5, false);
         mKDTree->index->loadIndex(f_in);
-        Debug("[MPASOGrid]::Loading KD Tree in %s", kdTree_path);
+        Debug("[MPASOGrid]::Loading KD Tree in [ %s ]", kdTree_path);
+        
     }
 #elif __APPLE__
     int n = cellCoord_vec.size();
@@ -178,7 +179,7 @@ void MPASOGrid::copyFromNdarray_Int(ftk::ndarray_group* g, std::string value, st
         vec.resize(tmp_vec.size());
         for (auto i = 0; i < tmp_vec.size(); i++)
             vec[i] = static_cast<size_t>(tmp_vec[i]);
-        Debug("[Ndarray]::loading %s_vec = \t [ %d ] \t type = [ %s ]", 
+        Debug("[Ndarray]::loading %-30s = \t [ %-8d ] \t type = [ %-10s ]", 
             value.c_str(),
             vec.size(), 
             ftk::ndarray_base::dtype2str(g->get(value).get()->type()).c_str());
@@ -198,7 +199,7 @@ void MPASOGrid::copyFromNdarray_Vec2(ftk::ndarray_group* g, std::string xValue, 
         {
             vec[i] = vec2(Lat_vec[i], Lon_vec[i]);
         }
-        Debug("[Ndarray]::loading %s = \t [ %d ] \t type = [ %s %s ]", 
+        Debug("[Ndarray]::loading %-30s = \t [ %-8d ] \t type = [ %-10s %-10s ]", 
             name.c_str(),
             vec.size(), 
             ftk::ndarray_base::dtype2str(g->get(xValue).get()->type()).c_str(),
@@ -221,13 +222,21 @@ void MPASOGrid::copyFromNdarray_Vec3(ftk::ndarray_group* g, std::string xValue, 
         {
            vec[i] = vec3(xEdge_vec[i], yEdge_vec[i], zEdge_vec[i]);
         }
-        std::cout << "Inside function, cellCoord_vec size: " << vec.size() << " at address: " << &vec << std::endl;
-        Debug("[Ndarray]::loading %s = \t [ %d ] \t type = [ %s %s %s]", 
+        // std::cout << "Inside function, cellCoord_vec size: " << vec.size() << " at address: " << &vec << std::endl;
+        // Debug("[Ndarray]::loading %s = \t [ %d ] \t type = [ %s %s %s]", 
+        //     name.c_str(),
+        //     vec.size(), 
+        //     ftk::ndarray_base::dtype2str(g->get(xValue).get()->type()).c_str(),
+        //     ftk::ndarray_base::dtype2str(g->get(yValue).get()->type()).c_str(),
+        //     ftk::ndarray_base::dtype2str(g->get(zValue).get()->type()).c_str());
+
+        Debug("[Ndarray]::loading %-30s = \t [ %-8d ] \t type = [ %-10s %-10s %-10s ]", 
             name.c_str(),
             vec.size(), 
             ftk::ndarray_base::dtype2str(g->get(xValue).get()->type()).c_str(),
             ftk::ndarray_base::dtype2str(g->get(yValue).get()->type()).c_str(),
             ftk::ndarray_base::dtype2str(g->get(zValue).get()->type()).c_str());
+
     }
     else
     {

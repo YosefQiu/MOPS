@@ -44,7 +44,7 @@ public:
     std::vector<float>      cellWeight_vec;
 
 public:
-    void initGrid(MPASOReader* reader);[[deprecated]]
+    [[deprecated]] void initGrid(MPASOReader* reader);
     void initGrid(ftk::ndarray_group* g, MPASOReader* reader = nullptr);
 	void createKDTree(const char* kdTree_path, sycl::queue& SYCL_Q);
     void searchKDT(const CartesianCoord& point, int& cell_id);

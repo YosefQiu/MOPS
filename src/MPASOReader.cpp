@@ -79,14 +79,15 @@ void MPASOReader::readData()
     NC_CHECK(err);
     mVertLevelsP1 = static_cast<int>(tmp);
 
+    Debug("%-40s = \t [ %d ]", "[MPASOReader]::loading mCellsSize", mCellsSize);
+    Debug("%-40s = \t [ %d ]", "[MPASOReader]::loading mEdgesSize", mEdgesSize);
+    Debug("%-40s = \t [ %d ]", "[MPASOReader]::loading mMaxEdgesSize", mMaxEdgesSize);
+    Debug("%-40s = \t [ %d ]", "[MPASOReader]::loading mVertexSize", mVertexSize);
+    Debug("%-40s = \t [ %d ]", "[MPASOReader]::loading mTimesteps", mTimesteps);
+    Debug("%-40s = \t [ %d ]", "[MPASOReader]::loading mVertLevels", mVertLevels);
+    Debug("%-40s = \t [ %d ]", "[MPASOReader]::loading mVertLevelsP1", mVertLevelsP1);
 
-    Debug("[MPASOReader]::loading mCellsSize = \t [ %d ]", mCellsSize);
-    Debug("[MPASOReader]::loading mEdgesSize = \t [ %d ]", mEdgesSize);
-    Debug("[MPASOReader]::loading mMaxEdgesSize = \t [ %d ]", mMaxEdgesSize);
-    Debug("[MPASOReader]::loading mVertexSize = \t [ %d ]", mVertexSize);
-    Debug("[MPASOReader]::loading mTimesteps = \t [ %d ]", mTimesteps);
-    Debug("[MPASOReader]::loading mVertLevels = \t [ %d ]", mVertLevels);
-    Debug("[MPASOReader]::loading mVertLevelsP1 = \t [ %d ]", mVertLevelsP1);
+
 }
 
 void MPASOReader::readSol(const int& timestep)
@@ -94,29 +95,29 @@ void MPASOReader::readSol(const int& timestep)
     int err, dimid;
     size_t tmp;
 
-    err = nc_inq_dimid(ncid, "nCells", &dimid);
-    NC_CHECK(err);
-    err = nc_inq_dimlen(ncid, dimid, &tmp);
-    NC_CHECK(err);
-    mCellsSize = static_cast<int>(tmp);
+    // err = nc_inq_dimid(ncid, "nCells", &dimid);
+    // NC_CHECK(err);
+    // err = nc_inq_dimlen(ncid, dimid, &tmp);
+    // NC_CHECK(err);
+    // mCellsSize = static_cast<int>(tmp);
 
-    err = nc_inq_dimid(ncid, "nEdges", &dimid);
-    NC_CHECK(err);
-    err = nc_inq_dimlen(ncid, dimid, &tmp);
-    NC_CHECK(err);
-    mEdgesSize = static_cast<int>(tmp);
+    // err = nc_inq_dimid(ncid, "nEdges", &dimid);
+    // NC_CHECK(err);
+    // err = nc_inq_dimlen(ncid, dimid, &tmp);
+    // NC_CHECK(err);
+    // mEdgesSize = static_cast<int>(tmp);
 
-    err = nc_inq_dimid(ncid, "maxEdges", &dimid);
-    NC_CHECK(err);
-    err = nc_inq_dimlen(ncid, dimid, &tmp);
-    NC_CHECK(err);
-    mMaxEdgesSize = static_cast<int>(tmp);
+    // err = nc_inq_dimid(ncid, "maxEdges", &dimid);
+    // NC_CHECK(err);
+    // err = nc_inq_dimlen(ncid, dimid, &tmp);
+    // NC_CHECK(err);
+    // mMaxEdgesSize = static_cast<int>(tmp);
 
-    err = nc_inq_dimid(ncid, "nVertices", &dimid);
-    NC_CHECK(err);
-    err = nc_inq_dimlen(ncid, dimid, &tmp);
-    NC_CHECK(err);
-    mVertexSize = static_cast<int>(tmp);
+    // err = nc_inq_dimid(ncid, "nVertices", &dimid);
+    // NC_CHECK(err);
+    // err = nc_inq_dimlen(ncid, dimid, &tmp);
+    // NC_CHECK(err);
+    // mVertexSize = static_cast<int>(tmp);
 
     err = nc_inq_dimid(ncid, "Time", &dimid);
     NC_CHECK(err);
@@ -135,7 +136,6 @@ void MPASOReader::readSol(const int& timestep)
     err = nc_inq_dimlen(ncid, dimid, &tmp);
     NC_CHECK(err);
     mVertLevelsP1 = static_cast<int>(tmp);
-
 
     currentTimestep = timestep;
 }

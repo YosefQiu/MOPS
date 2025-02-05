@@ -38,19 +38,12 @@ find_package(ndarray REQUIRED)
 message(STATUS "ndarray found at: ${ndarray_DIR}")
 # Attempt to find NetCDF
 find_package(netCDF)
-if(NETCDF_FOUND)
-    message(STATUS "netCDF found at: ${NETCDF_DIR}")
-else()
-    set(NetCDF_INCLUDE_DIRS "/opt/cray/pe/netcdf/4.9.0.9/intel/2023.2/include" "/opt/cray/pe/netcdf/4.9.0.9/include")
-    set(NetCDF_LIBRARIES "/opt/cray/pe/netcdf/4.9.0.9/intel/2023.2/lib/libnetcdf.so")
-    include_directories(${NetCDF_INCLUDE_DIRS})
-endif()
 
 include_directories(
   include
   ${ndarray_INCLUDE_DIRS}
   ${VTK_INCLUDE_DIRS}
-  ${NETCDF_INCLUDE_DIRS}
+  ${netCDF_INCLUDE_DIR}
 )
 
 set(CMAKE_C_FLAGS "-fsycl -fno-fast-math -fsycl-targets=nvptx64-nvidia-cuda")
@@ -68,10 +61,9 @@ add_executable(${PROJECT_NAME} ${SOURCE_FILES})
 
 set(TARGET_LIBRARIES
     CUDA::cudart
-    ${ndarray_LIBRARIES}
     yaml-cpp::yaml-cpp
     ndarray::ndarray
-    ${NetCDF_LIBRARIES}
+    netCDF::netcdf
 )
 
 if(USE_VTK)

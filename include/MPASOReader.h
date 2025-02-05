@@ -55,13 +55,13 @@ public:
 		reader->loadingData(); 
 		return reader;
 	}
-	[[deprecated]] static Ptr readSolInfo(const std::string& path, const int& timestep)
+	static Ptr readSolInfo(const std::string& path, const int& timestep)
 	{
 		std::shared_ptr<MPASOReader> reader(new MPASOReader(path));
 		reader->readSol(timestep);
 		return reader;
 	}
-	static Ptr loadingVelocityInfo(const std::string& path, const int& timestep) 
+	[[deprecated]] static Ptr loadingVelocityInfo(const std::string& path, const int& timestep) 
 	{
 		std::shared_ptr<MPASOReader> reader(new MPASOReader(path));
 		reader->loadingVelocity(timestep);

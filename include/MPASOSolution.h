@@ -8,7 +8,7 @@ class MPASOSolution
 public:
     MPASOSolution() = default;
 public:
-    void initSolution(MPASOReader* reader);[[deprecated]]
+    [[deprecated]] void initSolution(MPASOReader* reader);
     void initSolution(ftk::ndarray_group* g, MPASOReader* reader = nullptr);
 public:
     int mCurrentTime;

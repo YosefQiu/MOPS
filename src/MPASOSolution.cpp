@@ -206,11 +206,11 @@ void MPASOSolution::calcCellCenterZtop()
     auto nVertLevels = mVertLevels;
     auto nTimesteps = mCurrentTime;
 
-    //std::cout << "=======\n";
-    //std::cout << "nCellsSize = " << nCellsSize << std::endl;
-    ////std::cout << "nVertLevelsP1 = " << nVertLevelsP1 << std::endl;
-    //std::cout << "nVertLevels = " << nVertLevels << std::endl;
-    //std::cout << "nTimesteps = " << nTimesteps << std::endl;
+    // std::cout << "=======\n";
+    // std::cout << "nCellsSize = " << nCellsSize << std::endl;
+    // //std::cout << "nVertLevelsP1 = " << nVertLevelsP1 << std::endl;
+    // std::cout << "nVertLevels = " << nVertLevels << std::endl;
+    // std::cout << "nTimesteps = " << nTimesteps << std::endl;
 
     if (!cellZTop_vec.empty()) cellZTop_vec.clear();
     cellZTop_vec.resize(nCellsSize * nVertLevels);
@@ -915,32 +915,33 @@ void MPASOSolution::copyFromNdarray_Double(ftk::ndarray_group* g, std::string va
 {
     if (g->has(value))
     {
-        std::cout << "====== " << value << " found" << std::endl;
+        std::cout << "====== " << value << " found [\u2713]" << std::endl;
         auto tmp_get = g->get(value);
         // std::cout << "tmp_get = " << tmp_get.get() << std::endl;
         //  std::cout << "Actual type of tmp_get: " << typeid(*tmp_get).name() << std::endl;
         auto tmp_ptr = std::dynamic_pointer_cast<ftk::ndarray<float>>(g->get(value));
         if (tmp_ptr) // 检查转换是否成功
         {
+
             // std::cout << "tmp_ptr = " << tmp_ptr.get() << std::endl;
             auto tmp_vec = tmp_ptr->std_vector();
             // std::cout << "tmp_vec.size() = " << tmp_vec.size() << std::endl;
             vec.resize(tmp_vec.size());
             for (auto i = 0; i < tmp_vec.size(); i++)
                 vec[i] = static_cast<double>(tmp_vec[i]);
-            Debug("[Ndarray]::loading %s_vec = \t [ %d ] \t type = [ %s ]", 
+            Debug("[Ndarray]::loading %-30s_vec = \t [ %-8d ] \t type = [ %-10s ]",
                 value.c_str(),
                 vec.size(), 
                 ftk::ndarray_base::dtype2str(tmp_get->type()).c_str());
         }
         else
         {
-            std::cerr << "Error: The value found is not of type ftk::ndarray<double>" << std::endl;
+            std::cerr << "[Error]: The value found is not of type ftk::ndarray<double>" << std::endl;
         }
     }
     else
     {
-        Debug("[Ndarray]::%s not found", value.c_str());
+        Debug("[Ndarray]::%s not found [\u2717]", value.c_str());
     }
 
 }

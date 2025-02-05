@@ -175,3 +175,9 @@ inline void EditorErrorLog(const char* file, int nLine, const char* format, ...)
         WriteLog("[ERRORC]", file, nLine, szBuffer);
     }
 }
+
+inline std::string formatDebugMessage(const std::string& key, int value, int width = 40) {
+    std::stringstream ss;
+    ss << std::left << std::setw(width) << key << " = \t [ " << value << " ]";
+    return ss.str();
+}
