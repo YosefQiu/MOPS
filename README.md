@@ -10,10 +10,10 @@
 
 
 ## 📦 Installation
-### **1️⃣ Use CMake** (will be update use a new repo)
+### **1️⃣ Use CMake**
 ```bash
-git clone https://github.com/YosefQiu/sycl_ocean.git
-cd sycl_ocean
+git clone https://github.com/YosefQiu/MOPS.git
+cd MOPS
 mkdir build && cd build
 cmake .. 
 make -j$(nproc)
