@@ -38,7 +38,7 @@ public:
         return szEngineLog;
     }
 };
-//char szEngineLog[MAX_PATH_FOR_LOG];
+
 static void(*gEngineErrorReporter)(const char* msg) = nullptr;
 
 inline void SetEngineErrorReporter(void(*foo)(const char* msg))

@@ -1,10 +1,10 @@
 stream:
   name: mpas
-  path_prefix: "/global/cfs/projectdirs/m4259/milena/forParticleTracing"
+  path_prefix: "/global/cfs/projectdirs/m4259/hguo/20231012.GMPAS-JRA1p5.TL319_oRRS18to6.pm-cpu"
   substreams:
     - name: mesh
       format: netcdf
-      filenames: "mpaso.RRSwISC6to18E3r5.rstFromG-chrysalis.20240603.nc"
+      filenames: "run/MESH_20231012.GMPAS-JRA1p5.TL319_oRRS18to6.pm-cpu.mpassi.rst.0002-01-07_00000.nc"
       static: true
       vars:
         - name: xCell
@@ -31,12 +31,21 @@ stream:
         - name: verticesOnEdge
     - name: data
       format: netcdf
-      filenames: "20240726.icFromLRGcase.GMPAS-JRA1p5.TL319_RRSwISC6to18E3r5.chicoma.mpaso.hist.am.timeSeriesStatsMonthly.0001-03-01.nc"
+      filenames: "archive/ocn/hist/20231012.GMPAS-JRA1p5.TL319_oRRS18to6.pm-cpu.mpaso.hist.am.timeSeriesStatsMonthly.0001-01-01.nc"
       vars:
-        - name: xtime # the name will be the variable name in netCDF if possible_names is not given
+        - name: xtime_startMonthly # the name will be the variable name in netCDF if possible_names is not given
           possible_names: 
             - xtime 
             - xtime_startMonthly
+            - xtime_startDaily
+          dimensions: auto # by default auto
+          optional: false # by default false
+          multicomponents: true # if the inputs are not multicomponents, the resulting array will be made multicomponents
+        - name: xtime_endMonthly # the name will be the variable name in netCDF if possible_names is not given
+          possible_names: 
+            - xtime 
+            - xtime_endMonthly
+            - xtime_endDaily
           dimensions: auto # by default auto
           optional: false # by default false
           multicomponents: true # if the inputs are not multicomponents, the resulting array will be made multicomponents
@@ -44,17 +53,20 @@ stream:
           possible_names:
             - normalVelocity
             - timeMonthly_avg_normalVelocity
+            - timeDaily_avg_normalVelocity
           dimensions: auto
           multicomponents: true
         - name: timeMonthly_avg_velocityMeridional
           possible_names:
             - velocityMeridional
             - timeMonthly_avg_velocityMeridional
+            - timeDaily_avg_velocityMeridional
           multicomponents: true
         - name: timeMonthly_avg_velocityZonal
           possible_names:
             - velocityZonal
             - timeMonthly_avg_velocityZonal
+            - timeDaily_avg_velocityZonal
           multicomponents: true
         - name: timeMonthly_avg_vertVelocityTop
           possible_names:
@@ -83,6 +95,7 @@ stream:
           possible_names: 
             - layerThickness
             - timeMonthly_avg_layerThickness
+            - timeDaily_avg_layerThickness
           optional: true
           multicomponents: true
         - name: bottomDepth

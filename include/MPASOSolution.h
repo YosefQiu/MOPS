@@ -38,28 +38,29 @@ public:
     std::vector<vec3>      cellVertexVelocity_vec;
 
 public:
-
-    void getCellVelocity(const size_t cell_id, const size_t level, std::vector<vec3>& cell_on_velocity, vec3& vel);
-    void getCellVertVelocity(const size_t cell_id, const size_t level, std::vector<double>& cell_vert_velocity, double& vel);
-    void getCellZTop(const size_t cell_id, const size_t level, std::vector<double>& cell_ztop, double& ztop);
-    void getEdgeNormalVelocity(const size_t edge_id, const size_t level, std::vector<double>& edge_normal_velocity, double& vel);
+    // ** Deprecated **
+    // All get functions are the default data on the CPU side. 
+    // When the data is on the GPU side, 
+    // it should NOT be used.
+    [[deprecated]] void getCellVertVelocity(const size_t cell_id, const size_t level, std::vector<double>& cell_vert_velocity, double& vel);
+    [[deprecated]] void getCellVelocity(const size_t cell_id, const size_t level, std::vector<vec3>& cell_on_velocity, vec3& vel);
+    [[deprecated]] void getCellZTop(const size_t cell_id, const size_t level, std::vector<double>& cell_ztop, double& ztop);
+    [[deprecated]] void getEdgeNormalVelocity(const size_t edge_id, const size_t level, std::vector<double>& edge_normal_velocity, double& vel);
     void getCellLayerThickness(const size_t cell_id, const size_t level, std::vector<double>& cell_thickness, double& thinckness);
-    void getCellSurfaceMeridionalVelocity(const size_t cell_id, std::vector<double>& cell_meridional_velocity, double& vel);
-    void getCellSurfaceZonalVelocity(const size_t cell_id, std::vector<double>& cell_zonal_velocity, double& vel);
-
+    [[deprecated]] void getCellSurfaceMeridionalVelocity(const size_t cell_id, std::vector<double>& cell_meridional_velocity, double& vel);
+    [[deprecated]] void getCellSurfaceZonalVelocity(const size_t cell_id, std::vector<double>& cell_zonal_velocity, double& vel);
+    [[deprecated]] void getCellCenterZTop(const size_t cell_id, const size_t level, std::vector<double>& cell_ztop, double& ztop);
+    [[deprecated]] void getCellVertexZTop(const size_t vertex_id, const size_t level, std::vector<double>& cell_vertex_ztop, double& ztop);
+    [[deprecated]] void getCellCenterVelocity(const size_t cell_id, const size_t level, std::vector<vec3>& cell_on_velocity, vec3& vel);
+    [[deprecated]] void getCellVertexVelocity(const size_t vertex_id, const size_t level, std::vector<vec3>& cell_vertex_velocity, vec3& vel);
+public:
     void calcCellCenterZtop();
-    void calcCellVertexZtop(MPASOGrid* grid, sycl::queue& q);
-    void calcCellCenterVelocity(MPASOGrid* grid, sycl::queue& q);
-    void calcCellCenterVelocityByZM(MPASOGrid* grid, sycl::queue& q);
-    void calcCellVertexVelocity(MPASOGrid* grid, sycl::queue& q);
-
-    void getCellCenterZTop(const size_t cell_id, const size_t level, std::vector<double>& cell_ztop, double& ztop);
-    void getCellVertexZTop(const size_t vertex_id, const size_t level, std::vector<double>& cell_vertex_ztop, double& ztop);
-    void getCellCenterVelocity(const size_t cell_id, const size_t level, std::vector<vec3>& cell_on_velocity, vec3& vel);
-    void getCellVertexVelocity(const size_t vertex_id, const size_t level, std::vector<vec3>& cell_vertex_velocity, vec3& vel);
+    void calcCellVertexZtop(MPASOGrid* grid, std::string& dataDir, sycl::queue& q);
+    void calcCellCenterVelocity(MPASOGrid* grid, std::string& dataDir, sycl::queue& q);
+    void calcCellCenterVelocityByZM(MPASOGrid* grid, std::string& dataDir, sycl::queue& q);
+    void calcCellVertexVelocity(MPASOGrid* grid, std::string& dataDir, sycl::queue& q);
 private:
     void copyFromNdarray_Double(ftk::ndarray_group* g, std::string value, std::vector<double>& vec);
-    
-    //void copyFromNdarray_Double
+    void copyFromNdarray_Char(ftk::ndarray_group* g, std::string value, std::vector<char>& vec);
 };
 

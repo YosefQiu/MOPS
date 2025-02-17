@@ -6,10 +6,10 @@ set(CMAKE_C_COMPILER icx)
 set(CMAKE_CXX_COMPILER icpx)
 
 # Define an option for building with VTK support
-option(USE_VTK "Use VTK" ON)
+option(MOPS_USE_VTK "Use VTK" ON)
 
 # Find VTK if enabled
-if(USE_VTK)
+if(MOPS_USE_VTK)
     find_package(VTK COMPONENTS
       CommonColor
       CommonCore
@@ -66,13 +66,13 @@ set(TARGET_LIBRARIES
     netCDF::netcdf
 )
 
-if(USE_VTK)
+if(MOPS_USE_VTK)
     list(APPEND TARGET_LIBRARIES ${VTK_LIBRARIES})
 endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE ${TARGET_LIBRARIES})
 
-if(USE_VTK)
+if(MOPS_USE_VTK)
     vtk_module_autoinit(
         TARGETS ${PROJECT_NAME}
         MODULES ${VTK_LIBRARIES}

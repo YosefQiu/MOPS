@@ -43,6 +43,8 @@ make install
 | `--imagesize <width> <height>` | Image size in pixels (`width` and `height`). Default: `360 x 180` |
 | `--longitude <min> <max>` | Longitude range (`min` and `max`). Default: `-180 180` |
 | `--latitude <min> <max>` | Latitude range (`min` and `max`). Default: `-90 90` |
+| `--layer <layer> ` | Ocean layer. Default: `10` |
+| `--depth <meter>` | Ocean depth in meter. Default: `800` |
 | `--deltat <seconds>` | Time step (ΔT) in seconds. Default: `120` |
 | `--checkt <seconds>` | Check interval in seconds. Default: `60` |
 | `--trajectoryt <seconds>` | Total trajectory time in seconds. Default: `86400 (1 day)` |
@@ -68,6 +70,8 @@ Usage:
       --imagesize arg      Image Size (width height)
       --longitude arg      Longitude Range (min max)
       --latitude arg       Latitude Range (min max)
+      --layer              Fixed Layer
+      --depth              Fixed Depth
       --deltat arg         Delta T
       --checkt arg         Check T
       --trajectoryt arg    Trajectory T
@@ -108,6 +112,8 @@ Sets the sample number to `500`, uses Gaussian sampling, and selects trajectory 
 | `imagesize` | `360 x 180` |
 | `longitude` | `-180 180` |
 | `latitude` | `-90 90` |
+| `layer` | `10` |
+| `depth` | `800` |
 | `deltat` | `120` |
 | `checkt` | `60` |
 | `trajectoryt` | `86400` |

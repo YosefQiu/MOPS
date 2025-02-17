@@ -5,8 +5,6 @@
 
 struct Command 
 {
-
-
     enum class VisualizeType : int { kReMapping, kTrajectory, kCount };
     enum class SampleType : int { kUniform, kGaussian, kCount };
 
@@ -17,6 +15,8 @@ struct Command
     int image_height = 180;
     double longitude_min = -180.0, longitude_max = 180.0;
     double latitude_min = -90.0, latitude_max = 90.0;
+    float fixed_layer = 10.0;
+    float fixed_depth = 800.0;
     double delta_t = 120.0; // 120s
     double check_t = 60.0; // 1 min
     double trajectory_t = 86400.0; // 1 day
@@ -38,6 +38,8 @@ struct Command
             ("imagesize", "Image Size (width height)", cxxopts::value<std::vector<int>>())
             ("longitude", "Longitude Range (min max)", cxxopts::value<std::vector<double>>())
             ("latitude", "Latitude Range (min max)", cxxopts::value<std::vector<double>>())
+            ("layer", "fixed_layer", cxxopts::value<float>(cmd.fixed_layer))
+            ("depth", "fixed_depth", cxxopts::value<float>(cmd.fixed_depth))
             ("deltat", "Delta T", cxxopts::value<double>(cmd.delta_t))
             ("checkt", "Check T", cxxopts::value<double>(cmd.check_t))
             ("trajectoryt", "Trajectory T", cxxopts::value<double>(cmd.trajectory_t))
@@ -135,6 +137,8 @@ struct Command
         std::cout << "== Image Size: " << image_width << " x " << image_height << "\n";
         std::cout << "== Longitude Range: (" << longitude_min << ", " << longitude_max << ")\n";
         std::cout << "== Latitude Range: (" << latitude_min << ", " << latitude_max << ")\n";
+        std::cout << "== Fixed Layer: " << fixed_layer << " layer\n";
+        std::cout << "== Fixed Depth: " << fixed_depth << " m\n";
         std::cout << "== Delta T: " << delta_t << " s\n";
         std::cout << "== Check T: " << check_t << " s\n";
         std::cout << "== Trajectory T: " << trajectory_t << " s\n";
