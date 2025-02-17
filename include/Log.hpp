@@ -38,7 +38,7 @@ public:
         return szEngineLog;
     }
 };
-//char szEngineLog[MAX_PATH_FOR_LOG];
+
 static void(*gEngineErrorReporter)(const char* msg) = nullptr;
 
 inline void SetEngineErrorReporter(void(*foo)(const char* msg))
@@ -174,4 +174,10 @@ inline void EditorErrorLog(const char* file, int nLine, const char* format, ...)
     {
         WriteLog("[ERRORC]", file, nLine, szBuffer);
     }
+}
+
+inline std::string formatDebugMessage(const std::string& key, int value, int width = 40) {
+    std::stringstream ss;
+    ss << std::left << std::setw(width) << key << " = \t [ " << value << " ]";
+    return ss.str();
 }

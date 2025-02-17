@@ -51,6 +51,7 @@ struct TrajectorySettings
     size_t deltaT;   // 相隔多少秒计算一次 新的位置
     size_t simulationDuration; //要模拟的总时长
     size_t recordT; // 相隔多少秒存储一次 新的位置
+    float depth;
     std::string fileName;
 };
 
@@ -59,7 +60,7 @@ class MPASOVisualizer
 public:
     static void VisualizeFixedLayer(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, sycl::queue& sycl_Q);
     static void VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, sycl::queue& sycl_Q);
-    static void VisualizeFixedLatitude(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, sycl::queue& sycl_Q);
+    [[deprecated]] static void VisualizeFixedLatitude(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, sycl::queue& sycl_Q);
     static void GenerateSamplePoint(std::vector<CartesianCoord>& points, SamplingSettings* config);
     static void GenerateGaussianSpherePoints(std::vector<CartesianCoord>& points, SamplingSettings* config, int numPoints, double meanLat, double meanLon, double stdDev);
     static std::vector<CartesianCoord>  VisualizeTrajectory(MPASOField* mpasoF, std::vector<CartesianCoord>& points, TrajectorySettings* config, std::vector<int>& default_cell_id, sycl::queue& sycl_Q);

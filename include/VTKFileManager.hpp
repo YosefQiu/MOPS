@@ -2,7 +2,7 @@
 #include "ggl.h"
 #include "ImageBuffer.hpp"
 #include "MPASOVisualizer.h"
-
+#include <filesystem>
 
 
 inline std::string TypeToStr(VisualizeType type)
@@ -34,6 +34,25 @@ inline std::string checkAndModifyExtension(std::string outputName, const std::st
 	{
 		return outputName + "." + type;
 	}
+}
+
+inline std::string createDataPath(const std::string& basePath, const std::string& fileName)
+{
+	namespace fs = std::filesystem;
+	std::string dirPath = "./" + basePath + "/" + fileName;
+	if (!fs::exists(dirPath))
+	{
+		fs::create_directories(dirPath);
+		Debug("[Data]::Created directory: %s", dirPath.c_str());
+	}
+	return dirPath;
+}
+
+inline std::string removeFileExtension(const std::string& filePath) 
+{
+	namespace fs = std::filesystem;
+    fs::path pathObj(filePath);
+    return (pathObj.has_extension()) ? pathObj.stem().string() : filePath;
 }
 
 class VTKFileManager

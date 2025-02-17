@@ -2,6 +2,7 @@
 #include "ggl.h"
 #include <iostream>
 
+#define EARTH_RADIUS            6371.01 // Earth's radius in kilometers
 class Interpolator
 {
 public:
