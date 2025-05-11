@@ -5,6 +5,13 @@
 #include "SYCLKernel.h"
 
 
+#define CHECK_VECTOR(vec, name) \
+    if (vec.data() == nullptr || vec.size() == 0) { \
+        std::cerr << "[Warning] Vector '" << name << "' is empty or nullptr!" << std::endl; \
+    }
+
+using namespace MOPS;
+
 void MPASOVisualizer::VisualizeFixedLayer(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, sycl::queue& sycl_Q)
 {
     int width = config->imageSize.x();
@@ -189,7 +196,7 @@ void MPASOVisualizer::VisualizeFixedLayer(MPASOField* mpasoF, VisualizationSetti
 }
 
 
-void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, sycl::queue& sycl_Q)
+void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSettings* config, std::vector<ImageBuffer<double>>& img_vec, sycl::queue& sycl_Q)
 {
     int width = config->imageSize.x();
     int height = config->imageSize.y();
@@ -212,7 +219,7 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
     grid_info_vec.push_back(mpasoF->mGrid->mMaxEdgesSize);
     grid_info_vec.push_back(mpasoF->mGrid->mVertexSize);
     grid_info_vec.push_back(mpasoF->mGrid->mVertLevels);
-    grid_info_vec.push_back(mpasoF->mGrid->mVertLevelsP1);
+    // grid_info_vec.push_back(mpasoF->mGrid->mVertLevelsP1);
 
     std::vector<int> cell_id_vec; 
     cell_id_vec.resize(width * height); 
@@ -227,8 +234,10 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
     sycl::buffer<double, 1> maxLat_buf(&maxLat, 1);
     sycl::buffer<double, 1> minLon_buf(&minLon, 1);
     sycl::buffer<double, 1> maxLon_buf(&maxLon, 1);
-    sycl::buffer<double, 1> img_buf(img->mPixels.data(), sycl::range<1>(img->mPixels.size()));
     sycl::buffer<double, 1> depth_buf(&fixed_depth, 1);
+    std::vector<sycl::buffer<double, 1>> img_bufs;
+    for (auto& img : img_vec)
+        img_bufs.emplace_back(img.mPixels.data(), sycl::range<1>(img.mPixels.size()));
 
     sycl::buffer<int, 1> cellID_buf(cell_id_vec.data(), sycl::range<1>(cell_id_vec.size()));
     sycl::buffer<vec3, 1> vertexCoord_buf(mpasoF->mGrid->vertexCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->vertexCoord_vec.size())); // CELL 顶点坐标
@@ -236,16 +245,45 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
     sycl::buffer<size_t, 1> numberVertexOnCell_buf(mpasoF->mGrid->numberVertexOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->numberVertexOnCell_vec.size())); // CELL 有几个顶点
     sycl::buffer<size_t, 1> verticesOnCell_buf(mpasoF->mGrid->verticesOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->verticesOnCell_vec.size()));             // 
     sycl::buffer<size_t, 1> cellsOnVertex_buf(mpasoF->mGrid->cellsOnVertex_vec.data(), sycl::range<1>(mpasoF->mGrid->cellsOnVertex_vec.size()));
+    sycl::buffer<size_t, 1> cells_onCell_buf(mpasoF->mGrid->cellsOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->cellsOnCell_vec.size()));
     sycl::buffer<size_t, 1> grid_info_buf(grid_info_vec.data(), sycl::range<1>(grid_info_vec.size()));
+#pragma endregion sycl_buffer
 
     sycl::buffer<vec3, 1> cellVertexVelocity_buf(mpasoF->mSol_Front->cellVertexVelocity_vec.data(), sycl::range<1>(mpasoF->mSol_Front->cellVertexVelocity_vec.size()));
     sycl::buffer<double, 1> cellVertexZTop_buf(mpasoF->mSol_Front->cellVertexZTop_vec.data(), sycl::range<1>(mpasoF->mSol_Front->cellVertexZTop_vec.size()));
+
+    
+    std::vector<std::string> attr_names;
+    std::vector<sycl::buffer<double, 1>> attr_bufs;
+
+    for (const auto& [name, vec] : mpasoF->mSol_Front->mDoubleAttributes_CtoV)
+    {
+        attr_names.push_back(name);
+        attr_bufs.emplace_back(vec.data(), sycl::range<1>(vec.size()));
+    }
+
+    CHECK_VECTOR(img_vec[0].mPixels, "img_vec[0].mPixels");
+    CHECK_VECTOR(cell_id_vec, "cell_id_vec");
+    CHECK_VECTOR(mpasoF->mGrid->vertexCoord_vec, "vertexCoord_vec");
+    CHECK_VECTOR(mpasoF->mGrid->cellCoord_vec, "cellCoord_vec");
+    CHECK_VECTOR(mpasoF->mGrid->numberVertexOnCell_vec, "numberVertexOnCell_vec");
+    CHECK_VECTOR(mpasoF->mGrid->verticesOnCell_vec, "verticesOnCell_vec");
+    CHECK_VECTOR(mpasoF->mGrid->cellsOnVertex_vec, "cellsOnVertex_vec");
+    CHECK_VECTOR(grid_info_vec, "grid_info_vec");
+    CHECK_VECTOR(mpasoF->mSol_Front->cellVertexVelocity_vec, "cellVertexVelocity_vec");
+    CHECK_VECTOR(mpasoF->mSol_Front->cellVertexZTop_vec, "cellVertexZTop_vec");
+
+    for (const auto& [name, vec] : mpasoF->mSol_Front->mDoubleAttributes_CtoV) {
+        CHECK_VECTOR(vec, name);
+    }
 
     
 #pragma endregion sycl_buffer
 
     sycl_Q.submit([&](sycl::handler& cgh)  {
 #pragma region sycl_acc
+        constexpr int MAX_OUTPUTS = 8;  // max img_vec size
+        constexpr int MAX_ATTRS = 8;    // max attribute size
         auto width_acc = width_buf.get_access<sycl::access::mode::read>(cgh);
         auto height_acc = height_buf.get_access<sycl::access::mode::read>(cgh);
         auto minLat_acc = minLat_buf.get_access<sycl::access::mode::read>(cgh);
@@ -253,7 +291,14 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
         auto minLon_acc = minLon_buf.get_access<sycl::access::mode::read>(cgh);
         auto maxLon_acc = maxLon_buf.get_access<sycl::access::mode::read>(cgh);
         auto depth_acc = depth_buf.get_access<sycl::access::mode::read>(cgh);
-        auto img_acc = img_buf.get_access<sycl::access::mode::read_write>(cgh);
+        // auto img_acc = img_buf.get_access<sycl::access::mode::read_write>(cgh);
+        std::array<sycl::accessor<double, 1>, MAX_OUTPUTS> img_accs;
+        int img_count = img_bufs.size();
+        for (int i = 0; i < img_count; ++i) 
+        {
+            img_accs[i] = img_bufs[i].get_access<sycl::access::mode::read_write>(cgh);
+        }
+
 
         auto acc_cellID_buf = cellID_buf.get_access<sycl::access::mode::read>(cgh);
         auto acc_vertexCoord_buf = vertexCoord_buf.get_access<sycl::access::mode::read>(cgh);
@@ -261,11 +306,21 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
         auto acc_numberVertexOnCell_buf = numberVertexOnCell_buf.get_access<sycl::access::mode::read>(cgh);
         auto acc_verticesOnCell_buf = verticesOnCell_buf.get_access<sycl::access::mode::read>(cgh);
         auto acc_cellsOnVertex_buf = cellsOnVertex_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cells_onCell_buf = cells_onCell_buf.get_access<sycl::access::mode::read>(cgh);
         int grid_cell_size = mpasoF->mGrid->mCellsSize;
         auto acc_grid_info_buf = grid_info_buf.get_access<sycl::access::mode::read>(cgh);
 
         auto acc_cellVertexVelocity_buf = cellVertexVelocity_buf.get_access<sycl::access::mode::read>(cgh);
         auto acc_cellVertexZTop_buf = cellVertexZTop_buf.get_access<sycl::access::mode::read>(cgh);
+
+        std::array<sycl::accessor<double, 1, sycl::access::mode::read>, MAX_ATTRS> acc_attr_bufs;
+        int attr_count = attr_bufs.size();
+
+        for (int i = 0; i < attr_count; ++i) {
+            acc_attr_bufs[i] = attr_bufs[i].get_access<sycl::access::mode::read>(cgh);
+        }
+
+
 #pragma endregion sycl_acc
         
     sycl::stream out(1024, 256, cgh);
@@ -284,9 +339,9 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
             const int max_edge = (int)acc_grid_info_buf[2];
             const int MAX_VERTEX_NUM = 20;
             const int NEIGHBOR_NUM = 3;
-            const int TOTAY_ZTOP_LAYER = 80;
+            const int TOTAY_ZTOP_LAYER = (int)acc_grid_info_buf[4];
             const int MAX_VERTLEVELS = 100;
-            const int VERTLEVELS = 80;
+            const int VERTLEVELS = (int)acc_grid_info_buf[4];
             const double DEPTH = depth_acc[0];
             auto nan = std::numeric_limits<size_t>::max();
             auto double_nan = std::numeric_limits<double>::quiet_NaN();
@@ -309,7 +364,10 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
             bool is_land = SYCLKernel::IsInOcean(cell_id, max_edge, current_position, acc_numberVertexOnCell_buf, acc_verticesOnCell_buf, acc_vertexCoord_buf);
             if (is_land)
             {
-                SetPixel(img_acc, width_acc[0], height_acc[0], height_index, width_index, vec3_nan);
+                for (int i = 0; i < img_count; ++i)
+                {
+                    SetPixel(img_accs[i], width_acc[0], height_acc[0], height_index, width_index, vec3_nan);
+                }
                 return;
             }
          
@@ -367,14 +425,19 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
             }
               
             vec3 current_point_velocity_enu = {0.0, 0.0, 0.0};
+            vec3 current_point_attr_value = {0.0, 0.0, 0.0};
             if (local_layer == 0)
             {
                 imgValue = vec3_nan;
-                SetPixel(img_acc, width, height, height_index, width_index, imgValue);
+                for (int i = 0; i < img_count; ++i)
+                {
+                    SetPixel(img_accs[i], width, height, height_index, width_index, imgValue);
+                }
                 return;
             }
             else
             {
+                double attr_value_vec[MAX_ATTRS];
                 auto layer = local_layer;
                 double ztop_layer1, ztop_layer2;
                 ztop_layer1 = current_point_ztop_vec[layer];
@@ -399,12 +462,21 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
                         
                 double zional_velocity, merminoal_velicity;
                 GeoConverter::convertXYZVelocityToENU(current_position, final_vel, zional_velocity, merminoal_velicity);
-                current_point_velocity_enu = {zional_velocity, merminoal_velicity, 0.0};
+                double total_velocity = sycl::sqrt(zional_velocity * zional_velocity + merminoal_velicity * merminoal_velicity);
+                current_point_velocity_enu = {zional_velocity, merminoal_velicity, total_velocity};
+
+                for (int attr_idx = 0; attr_idx < attr_count; ++attr_idx)
+                {
+                    double attr_value = SYCLKernel::CalcAttribute(current_cell_vertices_idx, current_cell_vertex_weight, 
+                        MAX_VERTEX_NUM, current_cell_vertices_number, TOTAY_ZTOP_LAYER, layer, acc_attr_bufs[attr_idx]);
+                    attr_value_vec[attr_idx] = attr_value;
                     
+                }
+                current_point_attr_value = {attr_value_vec[0], attr_value_vec[1], 0.0};
             }
                 
-            SetPixel(img_acc, width, height, height_index, width_index, current_point_velocity_enu);
-                
+            SetPixel(img_accs[0], width, height, height_index, width_index, current_point_velocity_enu);
+            SetPixel(img_accs[1], width, height, height_index, width_index, current_point_attr_value);
         }
 
         });
@@ -643,17 +715,17 @@ void MPASOVisualizer::VisualizeFixedLatitude(MPASOField* mpasoF, VisualizationSe
 
 void MPASOVisualizer::GenerateSamplePoint(std::vector<CartesianCoord>& points, SamplingSettings* config)
 {
-    auto minLat = config->sampleLatitudeRange.x(); auto maxLat = config->sampleLatitudeRange.y();
-    auto minLon = config->sampleLongitudeRange.x(); auto maxLon = config->sampleLongitudeRange.y();
+    auto minLat = config->getLatitudeRange().x(); auto maxLat = config->getLatitudeRange().y();
+    auto minLon = config->getLongitudeRange().x(); auto maxLon = config->getLongitudeRange().y();
 
-    double i_step = (maxLat - minLat) / static_cast<double>(config->sampleNumer.x() - 1);
-    double j_step = (maxLon - minLon) / static_cast<double>(config->sampleNumer.y() - 1);
+    double i_step = (maxLat - minLat) / static_cast<double>(config->getSampleRange().x() - 1);
+    double j_step = (maxLon - minLon) / static_cast<double>(config->getSampleRange().y() - 1);
 
     for (double i = minLat ; i < maxLat; i += i_step)
     {
         for (double j = minLon; j < maxLon; j += j_step)
         {
-            CartesianCoord p = { j, i, config->sampleDepth };
+            CartesianCoord p = { j, i, config->getDepth() };
             points.push_back(p);
         }
     }
@@ -676,13 +748,13 @@ void MPASOVisualizer::GenerateSamplePoint(std::vector<CartesianCoord>& points, S
 [[deprecated]]
 void MPASOVisualizer::GenerateGaussianSpherePoints(std::vector<CartesianCoord>& points, SamplingSettings* config, int numPoints, double meanLat, double meanLon, double stdDev)
 {
-    auto minLat = config->sampleLatitudeRange.x(); auto maxLat = config->sampleLatitudeRange.y();
-    auto minLon = config->sampleLongitudeRange.x(); auto maxLon = config->sampleLongitudeRange.y();
+    auto minLat = config->getLatitudeRange().x(); auto maxLat = config->getLatitudeRange().y();
+    auto minLon = config->getLongitudeRange().x(); auto maxLon = config->getLongitudeRange().y();
 
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::normal_distribution<double> latDist(meanLat, stdDev); // 纬度高斯分布
-    std::normal_distribution<double> lonDist(meanLon, stdDev); // 经度高斯分布
+    std::normal_distribution<double> latDist(meanLat, stdDev); // Latitude Gaussian distribution
+    std::normal_distribution<double> lonDist(meanLon, stdDev); // Longitude Gaussian distribution
 
     for (int i = 0; i < numPoints; ++i) {
         double lat, lon;
@@ -730,11 +802,10 @@ vec3 normalize(const vec3& v)
     return normalized;
 }
 
-void rotateAroundAxis(const vec3& point, const vec3& axis, double theta, double& x, double& y, double& z)
+void rotateAroundAxis(const vec3& point, const vec3& axis, double theta_rad, double& x, double& y, double& z)
 {
-    // 传入的是角度
-    double PI = 3.14159265358979323846;
-    double thetaRad = theta * PI / 180.0;
+    // 传入的是弧度
+    double thetaRad = theta_rad;
     double cosTheta = sycl::cos(thetaRad);
     double sinTheta = sycl::sin(thetaRad);
     vec3 u = normalize(axis);
@@ -758,13 +829,86 @@ void rotateAroundAxis(const vec3& point, const vec3& axis, double theta, double&
 }
 
 
-std::vector<CartesianCoord>  MPASOVisualizer::VisualizeTrajectory(MPASOField* mpasoF, std::vector<CartesianCoord>& points, TrajectorySettings* config, std::vector<int>& default_cell_id, sycl::queue& sycl_Q)
+
+bool isClose(double a, double b, double eps = 1e-6) {
+    return std::fabs(a - b) < eps;
+}
+
+bool isCloseVec3(const CartesianCoord& a, const CartesianCoord& b, double eps = 1e-6) {
+    return isClose(a.x(), b.x(), eps) && isClose(a.y(), b.y(), eps) && isClose(a.z(), b.z(), eps);
+}
+
+bool compareTrajectoryLines(const std::vector<TrajectoryLine>& a, const std::vector<TrajectoryLine>& b) {
+    if (a.size() != b.size()) {
+        std::cout << "[Compare] Line vector size mismatch: " << a.size() << " vs " << b.size() << std::endl;
+        return false;
+    }
+
+    for (size_t i = 0; i < a.size(); ++i) {
+        const auto& la = a[i];
+        const auto& lb = b[i];
+
+        if (la.lineID != lb.lineID) {
+            std::cout << "[Compare] LineID mismatch at index " << i << ": " << la.lineID << " vs " << lb.lineID << std::endl;
+            return false;
+        }
+
+        if (la.points.size() != lb.points.size()) {
+            std::cout << "[Compare] Points size mismatch at line " << i << ": " << la.points.size() << " vs " << lb.points.size() << std::endl;
+            return false;
+        }
+
+        for (size_t j = 0; j < la.points.size(); ++j) {
+            if (!isCloseVec3(la.points[j], lb.points[j])) {
+                std::cout << "[Compare] Point mismatch at line " << i << ", point " << j << std::endl;
+                return false;
+            }
+        }
+
+        if (!isCloseVec3(la.lastPoint, lb.lastPoint)) {
+            std::cout << "[Compare] LastPoint mismatch at line " << i << std::endl;
+            return false;
+        }
+
+        if (!isClose(la.duration, lb.duration)) {
+            std::cout << "[Compare] Duration mismatch at line " << i << ": " << la.duration << " vs " << lb.duration << std::endl;
+            return false;
+        }
+
+        if (!isClose(la.timestamp, lb.timestamp)) {
+            std::cout << "[Compare] Timestamp mismatch at line " << i << ": " << la.timestamp << " vs " << lb.timestamp << std::endl;
+            return false;
+        }
+    }
+
+    std::cout << "[Compare] All trajectory lines are identical!" << std::endl;
+    return true;
+}
+
+std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std::vector<CartesianCoord>& points, TrajectorySettings* config, std::vector<int>& default_cell_id, sycl::queue& sycl_Q)
 {
     
+    std::vector<vec3> stable_points = points; 
+
     std::vector<vec3> update_points;
     if (!update_points.empty()) update_points.clear();
-    update_points.resize(points.size() * (config->simulationDuration / config->recordT));
+    update_points.resize(stable_points.size() * (config->simulationDuration / config->recordT));
 
+    std::cout << "points.size = " << stable_points.size() 
+          << ", default_cell_id.size = " << default_cell_id.size() << std::endl;
+
+    std::vector<TrajectoryLine> trajectory_lines;
+    trajectory_lines.resize(stable_points.size());
+    tbb::parallel_for(size_t(0), stable_points.size(), [&](size_t i) {
+        trajectory_lines[i].lineID = i;
+        trajectory_lines[i].points.push_back(stable_points[i]);
+        trajectory_lines[i].lastPoint = stable_points[i];
+        trajectory_lines[i].duration = config->simulationDuration;
+        trajectory_lines[i].timestamp = config->deltaT;
+        trajectory_lines[i].depth = config->depth;
+    });
+
+   
     std::vector<size_t> grid_info_vec;
     // tbl
     // 0 : mCellsSize
@@ -778,7 +922,7 @@ std::vector<CartesianCoord>  MPASOVisualizer::VisualizeTrajectory(MPASOField* mp
     grid_info_vec.push_back(mpasoF->mGrid->mMaxEdgesSize);
     grid_info_vec.push_back(mpasoF->mGrid->mVertexSize);
     grid_info_vec.push_back(mpasoF->mGrid->mVertLevels);
-    grid_info_vec.push_back(mpasoF->mGrid->mVertLevelsP1);
+    // grid_info_vec.push_back(mpasoF->mGrid->mVertLevelsP1);
 
 #pragma region sycl_buffer_grid
     sycl::buffer<vec3, 1> vertexCoord_buf(mpasoF->mGrid->vertexCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->vertexCoord_vec.size())); // CELL 顶点坐标
@@ -798,7 +942,7 @@ std::vector<CartesianCoord>  MPASOVisualizer::VisualizeTrajectory(MPASOField* mp
 
     sycl::buffer<int, 1> cellID_buf(default_cell_id.data(), sycl::range<1>(default_cell_id.size()));
     sycl::buffer<vec3> wirte_points_buf(update_points.data(), sycl::range<1>(update_points.size()));
-    sycl::buffer<vec3> sample_points_buf(points.data(), sycl::range<1>(points.size()));
+    sycl::buffer<vec3> sample_points_buf(stable_points.data(), sycl::range<1>(stable_points.size()));
     sycl_Q.submit([&](sycl::handler& cgh) 
     {
 
@@ -831,18 +975,24 @@ std::vector<CartesianCoord>  MPASOVisualizer::VisualizeTrajectory(MPASOField* mp
         float config_depth = config->depth;
 
         
-        
+       
         cgh.parallel_for(sycl::range<1>(points.size()), [=](sycl::item<1> item) 
         {
-
             int global_id = item[0];
-            const int CELL_SIZE = (int)acc_grid_info_buf[0];
-            const int MAX_VERTEX_NUM = 7;
-            const int MAX_VERTEX_NUM_ADD_ONE = 8;
-            const int NEIGHBOR_NUM = 3;
-            const int TOTAY_ZTOP_LAYER = 80;
-            const int VERTLEVELS = 80;
-            double fixed_depth = -1.0f * config_depth;
+            // load from grid info
+            const int ACTUALL_CELL_SIZE         = (int)acc_grid_info_buf[0];
+            const int ACTUALL_EDGE_SIZE         = (int)acc_grid_info_buf[1];
+            const int ACTUALL_MAX_EDGE_SIZE     = (int)acc_grid_info_buf[2];
+            const int ACTUALL_VERTEX_SIZE       = (int)acc_grid_info_buf[3];
+            const int ACTUALL_ZTOP_LAYER        = (int)acc_grid_info_buf[4];
+            // default
+            const int MAX_VERTEX_NUM            = 20;
+            const int MAX_CELL_NEIGHBOR_NUM     = 21;
+            const int MAX_VERTLEVELS            = 80;
+            const int NEIGHBOR_NUM              = 3;
+            // const int TOTAY_ZTOP_LAYER          = 60;
+            // const int VERTLEVELS                = 60;
+            double fixed_depth                  = -1.0f * config_depth;
 
             double runTime = 0.0;
             int save_times = 0;
@@ -852,46 +1002,50 @@ std::vector<CartesianCoord>  MPASOVisualizer::VisualizeTrajectory(MPASOField* mp
             int update_points_idx = 0;
 
             // 1. 获取point position
-            
             vec3 position; 
             int cell_id = -1;
             vec3 new_position;
             double pos_x, pos_y, pos_z;
-            int cell_neig_vec[MAX_VERTEX_NUM_ADD_ONE];
+            int cell_neig_vec[MAX_CELL_NEIGHBOR_NUM];
+
+
+            if (bFirstLoop == false) {
+                if (cell_id < 0 || cell_id >= acc_numberVertexOnCell_buf.get_range()[0]) {
+                    out << "[Error] cell_id out of range: " << cell_id << sycl::endl;
+                    return;
+                }
+            }
 
 
             for (auto times_i = 0; times_i < times; times_i++)
             {
+                
                 runTime += deltaT;
                 position = acc_sample_points_buf[global_id];
                 int firtst_cell_id = acc_def_cell_id_buf[global_id];
-                //out << times_i << " 1::: " << position.x() << " " << position.y() << " " << position.z() << sycl::endl;
+                // 第一次循环
                 if (bFirstLoop)
                 {
-
                     bFirstLoop = false;
                     cell_id = firtst_cell_id;
                     
-                    // 找到有多少个点
+                    // 找到这个CELL有多少个点
                     auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
-                    cell_neig_vec[0] = cell_id;
-                    for (auto k = 1; k < current_cell_vertices_number; k++)
-                    {
-                        int negi_cell_id = acc_cells_onCell_buf[MAX_VERTEX_NUM * cell_id + k];
-                        cell_neig_vec[k] = negi_cell_id - 1;
-                    }
-                    for (auto k = current_cell_vertices_number; k < MAX_VERTEX_NUM; k++)
-                    {
-                        cell_neig_vec[k] = std::numeric_limits<int>::quiet_NaN();
-                    }
+                    SYCLKernel::GetCellNeighborsIdx(cell_id, current_cell_vertices_number, cell_neig_vec, MAX_VERTEX_NUM, ACTUALL_MAX_EDGE_SIZE, acc_cells_onCell_buf);
+                    
+                    int acc_wirte_pints_idx = base_idx + 0;
+                    acc_wirte_points_buf[acc_wirte_pints_idx] = position;
                 }
                 else
                 {
+                    // 找到这个CELL有多少个点
                     auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
                     double max_len = std::numeric_limits<double>::max();
                     for (auto idx = 0; idx < current_cell_vertices_number + 1; idx++)
                     {
+                        // 判断当前点 POS 在 哪个CELL 中  -> get new_cell_id
                         auto CID = cell_neig_vec[idx];
+                        if (CID < 0 || CID >= acc_cellCoord_buf.get_range()[0]) continue;
                         vec3 pos = acc_cellCoord_buf[CID];
                         double len = YOSEF_LENGTH(pos - position);
                         if (len < max_len)
@@ -900,86 +1054,40 @@ std::vector<CartesianCoord>  MPASOVisualizer::VisualizeTrajectory(MPASOField* mp
                             cell_id = CID;
                         }
                     }
-                    cell_neig_vec[0] = cell_id;
-                    for (auto k = 1; k < current_cell_vertices_number; k++)
-                    {
-                        int negi_cell_id = acc_cells_onCell_buf[MAX_VERTEX_NUM * cell_id + k];
-                        cell_neig_vec[k] = negi_cell_id - 1;
-                    }
-                    for (auto k = current_cell_vertices_number; k < MAX_VERTEX_NUM; k++)
-                    {
-                        cell_neig_vec[k] = std::numeric_limits<int>::quiet_NaN();
-                    }
+                    SYCLKernel::GetCellNeighborsIdx(cell_id, current_cell_vertices_number, cell_neig_vec, MAX_VERTEX_NUM, ACTUALL_MAX_EDGE_SIZE, acc_cells_onCell_buf);
+                   
                 }
 
-                // out << "1.5::::: tmp cell_id " << cell_id << sycl::endl;
-
-
-
-#pragma region IsOnOcean
                 // 判断是否在大陆上
-                bool is_land = false;
-                // 1.1 计算这个CELL 有多少个顶点
+                vec3 current_position = position;
                 auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
-                // 1.2 找出所有候选顶点
                 size_t current_cell_vertices_idx[MAX_VERTEX_NUM];
-                for (size_t k = 0; k < MAX_VERTEX_NUM; ++k)
-                {
-                    current_cell_vertices_idx[k] = acc_verticesOnCell_buf[cell_id * MAX_VERTEX_NUM + k] - 1; // Assuming 7 is the max number of vertices per cell
-                }
-                // 1.3 不存在的顶点设置为nan
-                auto nan = std::numeric_limits<size_t>::max();
-                for (size_t k = current_cell_vertices_number; k < MAX_VERTEX_NUM; ++k)
-                {
-                    current_cell_vertices_idx[k] = nan;
-                }
-                // =============================== 找到7个顶点
-                double normalsConsistency[MAX_VERTEX_NUM];
-                for (auto k = 0; k < current_cell_vertices_number; k++)
-                {
-                    auto A_idx = current_cell_vertices_idx[k];
-                    auto B_idx = current_cell_vertices_idx[(k + 1) % current_cell_vertices_number];
-                    auto A = acc_vertexCoord_buf[A_idx];
-                    auto B = acc_vertexCoord_buf[B_idx];
-                    vec3 O(0.0, 0.0, 0.0);
-                    auto AO = O - A;
-                    auto BO = O - B;
-                    auto A_point = position - A;
-                    vec3 surface_normal = YOSEF_CROSS(AO, BO);
-                    double direction = YOSEF_DOT(surface_normal, A_point);
-                    normalsConsistency[k] = direction;
-                }
-                int sign = (normalsConsistency[0] > 0) ? 1 : -1;
-                for (auto k = 1; k < current_cell_vertices_number; k++)
-                {
-                    int currentSign = (normalsConsistency[k] > 0) ? 1 : -1;
-                    if (currentSign != sign)
-                    {
-                        // 这个点在大陆上
-                        is_land = true;
-                        break;
-                    }
-                }
+                SYCLKernel::GetCellVerticesIdx(cell_id, current_cell_vertices_number, current_cell_vertices_idx, MAX_VERTEX_NUM, ACTUALL_MAX_EDGE_SIZE, acc_verticesOnCell_buf);
+                bool is_land = SYCLKernel::IsInOcean(cell_id, ACTUALL_MAX_EDGE_SIZE, current_position, acc_numberVertexOnCell_buf, acc_verticesOnCell_buf, acc_vertexCoord_buf);
                 if (is_land)
                 {
                     continue;
                 }
-#pragma endregion IsOnOcean  
+
                 
-               
-                double current_point_ztop_vec[VERTLEVELS];
+                // 计算当前点 的ZTOP
+                double current_point_ztop_vec[MAX_VERTLEVELS];
+
                 vec3 current_cell_vertex_pos[MAX_VERTEX_NUM];
                 double current_cell_vertex_weight[MAX_VERTEX_NUM];
-                for (auto v_idx = 0; v_idx < current_cell_vertices_number; v_idx++)
+                bool rc = SYCLKernel::GetCellVertexPos(current_cell_vertex_pos, current_cell_vertices_idx, MAX_VERTEX_NUM, current_cell_vertices_number, acc_vertexCoord_buf);
+                if (!rc)
                 {
-                    auto VID = current_cell_vertices_idx[v_idx];
-                    vec3 pos = acc_vertexCoord_buf[VID];
-                    current_cell_vertex_pos[v_idx] = pos;
+                    out << "[ERROR]:: GetCellVertexPos Failed....(VLA < current_cell_vertices_number)" << sycl::endl;
+                    return;
                 }
                 // washpress
-                Interpolator::CalcPolygonWachspress(position, current_cell_vertex_pos, current_cell_vertex_weight, current_cell_vertices_number);
+                Interpolator::CalcPolygonWachspress(current_position, current_cell_vertex_pos, current_cell_vertex_weight, current_cell_vertices_number);
 
-                for (auto k = 0; k < VERTLEVELS; ++k)
+                int ztop_range = acc_cellVertexZTop_buf.get_range()[0];
+                int vel_range = acc_cellVertexVelocity_buf.get_range()[0];
+
+                for (auto k = 0; k < ACTUALL_ZTOP_LAYER; ++k)
                 {
                     double current_point_ztop_in_layer = 0.0;
                     // 获取每个顶点的ztop
@@ -987,7 +1095,12 @@ std::vector<CartesianCoord>  MPASOVisualizer::VisualizeTrajectory(MPASOField* mp
                     for (auto v_idx = 0; v_idx < current_cell_vertices_number; v_idx++)
                     {
                         auto VID = current_cell_vertices_idx[v_idx];
-                        double ztop = acc_cellVertexZTop_buf[VID * TOTAY_ZTOP_LAYER + k];
+                        if (VID < 0 || VID >= acc_vertexCoord_buf.get_range()[0]) {
+                            out << "[ERROR] Invalid VID: " << VID << sycl::endl;
+                            return;
+                        }
+
+                        double ztop = acc_cellVertexZTop_buf[VID * ACTUALL_ZTOP_LAYER + k];
                         current_cell_vertex_ztop[v_idx] = ztop;
                     }
                     // 计算当前点的ZTOP
@@ -998,259 +1111,472 @@ std::vector<CartesianCoord>  MPASOVisualizer::VisualizeTrajectory(MPASOField* mp
                     current_point_ztop_vec[k] = current_point_ztop_in_layer;
                 }
 
-                int layer = -1;
                 const double EPSILON = 1e-6;
-                for (auto k = 1; k < VERTLEVELS; ++k)
+                int local_layer = 0;
+                for (auto k = 1; k < ACTUALL_ZTOP_LAYER; ++k)
                 {
                     if (fixed_depth <= current_point_ztop_vec[k - 1] - EPSILON && fixed_depth >= current_point_ztop_vec[k] + EPSILON)
                     {
-                        layer = k;
+                        local_layer = k;
                         break;
                     }
                 }
             
                
-                if (layer == -1)
+                if (local_layer == 0)
                 {
                     continue;
                 }
                 else
                 {
+                    // 计算当前点的速度
                     double ztop_layer1, ztop_layer2;
-                    ztop_layer1 = current_point_ztop_vec[layer];
-                    ztop_layer2 = current_point_ztop_vec[layer - 1];
+                    ztop_layer1 = current_point_ztop_vec[local_layer];
+                    ztop_layer2 = current_point_ztop_vec[local_layer - 1];
                     double t = (sycl::fabs(fixed_depth) - sycl::fabs(ztop_layer1)) / (sycl::fabs(ztop_layer2) - sycl::fabs(ztop_layer1));
-                    double current_point_ztop;
-                    current_point_ztop = t * ztop_layer1 + (1 - t) * ztop_layer2;
-                    //imgValue = { current_point_ztop , current_point_ztop , current_point_ztop };
+                    // double current_point_ztop;
+                    // current_point_ztop = t * ztop_layer1 + (1 - t) * ztop_layer2;
+                    
                     vec3 final_vel;
                     // 算出 这两个layer的速度
-                    vec3 vertex_vel1[MAX_VERTEX_NUM];
-                    vec3 vertex_vel2[MAX_VERTEX_NUM];
-                    vec3 current_point_vel1 = { 0.0, 0.0, 0.0 };
-                    vec3 current_point_vel2 = { 0.0, 0.0, 0.0 };
-                    for (auto v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx)
-                    {
-                        auto VID = current_cell_vertices_idx[v_idx];
-                        vec3 vel1 = acc_cellVertexVelocity_buf[VID * TOTAY_ZTOP_LAYER + layer];
-                        vec3 vel2 = acc_cellVertexVelocity_buf[VID * TOTAY_ZTOP_LAYER + layer - 1];
-                        vertex_vel1[v_idx] = vel1;
-                        vertex_vel2[v_idx] = vel2;
-                    }
-                    for (auto v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx)
-                    {
-                        current_point_vel1.x() += current_cell_vertex_weight[v_idx] * vertex_vel1[v_idx].x(); // layer
-                        current_point_vel1.y() += current_cell_vertex_weight[v_idx] * vertex_vel1[v_idx].y();
-                        current_point_vel1.z() += current_cell_vertex_weight[v_idx] * vertex_vel1[v_idx].z();
-
-                        current_point_vel2.x() += current_cell_vertex_weight[v_idx] * vertex_vel2[v_idx].x(); //layer - 1
-                        current_point_vel2.y() += current_cell_vertex_weight[v_idx] * vertex_vel2[v_idx].y();
-                        current_point_vel2.z() += current_cell_vertex_weight[v_idx] * vertex_vel2[v_idx].z();
-                    }
+                    // vec3 vertex_vel1[MAX_VERTEX_NUM];
+                    // vec3 vertex_vel2[MAX_VERTEX_NUM];
+                    vec3 current_point_vel1 = SYCLKernel::CalcVelocity(current_cell_vertices_idx, current_cell_vertex_weight, 
+                        MAX_VERTEX_NUM, current_cell_vertices_number, ACTUALL_ZTOP_LAYER, local_layer, acc_cellVertexVelocity_buf);
+                
+                    vec3 current_point_vel2 = SYCLKernel::CalcVelocity(current_cell_vertices_idx, current_cell_vertex_weight, 
+                        MAX_VERTEX_NUM, current_cell_vertices_number, ACTUALL_ZTOP_LAYER, local_layer - 1, acc_cellVertexVelocity_buf);
+                    
                     final_vel.x() = t * current_point_vel2.x() + (1 - t) * current_point_vel1.x();
                     final_vel.y() = t * current_point_vel2.y() + (1 - t) * current_point_vel1.y();
                     final_vel.z() = t * current_point_vel2.z() + (1 - t) * current_point_vel1.z();
 
                     vec3 current_velocity = final_vel;
 
-                    double r = YOSEF_LENGTH(position);
-                    vec3 rotationAxis = computeRotationAxis(position, current_velocity);
+                    double r = YOSEF_LENGTH(current_position);
+                    vec3 rotationAxis = SYCLKernel::CalcRotationAxis(current_position, current_velocity);
+                    double speed = YOSEF_LENGTH(current_velocity);
+                    double theta_rad = (speed * deltaT) / r;
+                    new_position = SYCLKernel::CalcPositionAfterRotation(current_position, rotationAxis, theta_rad);
+                   
 
-                    double speed = magnitude(current_velocity);
-                    double theta = (speed * deltaT) / r;
-                    double thetaInDegrees = theta * (180.0 / 3.141592653589793); // 将弧度转换为角度
-
-                    //vec3 rotatedPosition = 
-                    rotateAroundAxis(position, rotationAxis, thetaInDegrees, pos_x, pos_y, pos_z);
-                    //out << " 2:::: " << position.x() << " " << position.y() << " " << position.z() << " ps " << pos_x << " " << pos_y << " " << pos_z << sycl::endl;   
-                    new_position = {pos_x, pos_y, pos_z};
                     acc_sample_points_buf[global_id] = new_position;
                     
                     if ((int)runTime % recordT == 0)
                     {
-                        //save .//TODO
+                        // //save .//TODO
                         int acc_wirte_pints_idx = base_idx + update_points_idx;
                         acc_wirte_points_buf[acc_wirte_pints_idx] = new_position;
                         update_points_idx = update_points_idx + 1;
                     }
-
+                    
                 } 
-            
-            
-            
             }
         });
+        
        
     });
-    sycl_Q.wait();
+    try {
+        sycl_Q.wait();
+    } catch (sycl::exception const& e) {
+        std::cerr << "Caught SYCL exception: " << e.what() << std::endl;
+        std::exit(1);
+    }
 
     Debug("[VisualizeTrajectory]::Finished...");
-    // auto after_p = sample_points_buf.get_access<sycl::access::mode::read>(); 
-    auto after_p = sample_points_buf.get_host_access(sycl::read_only);
     // auto after_write_p = wirte_points_buf.get_access<sycl::access::mode::read>();
-    auto after_write_p = wirte_points_buf.get_host_access(sycl::read_only);
+    auto after_write_p = wirte_points_buf.get_host_access(sycl::read_only); // XYZ
     std::vector<CartesianCoord> last_points;
-    // for (size_t i = 0; i < points.size(); ++i) 
-    // {
-    //     vec3 p = after_p[i];
-    //     // Convert to lat/lon
-    //     vec2 new_latlon;
-    //     GeoConverter::convertXYZToLatLonDegree(p, new_latlon);
-    //     std::cout << std::fixed << std::setprecision(4) <<"GPU times " << config->simulationDuration / config->deltaT  << " " << p.x() << " " << p.y() << " " << p.z() << std::endl;
-    //     std::cout << std::fixed << std::setprecision(4) <<"GPU times " << config->simulationDuration / config->deltaT  << " " << new_latlon.x() << " " << new_latlon.y() << std::endl;
-    // }
+    
 
-    //Save
-    std::vector<vtkSmartPointer<vtkPolyData>> polyDataList;
-    std::vector<std::string> file_name_vec;
-    int each_point_size = config->simulationDuration / config->recordT;
-    int file_times = 0;
-    for (auto i = 0; i < update_points.size(); i++) 
-    {
-        vec3 p = after_write_p[i];
-        vtkSmartPointer<vtkPoints> vtk_points = vtkSmartPointer<vtkPoints>::New();
-    	// 转为经纬度
-    	vec2 new_latlon;
-    	GeoConverter::convertXYZToLatLonDegree(p, new_latlon);
-        vtk_points->InsertNextPoint(new_latlon.y(), new_latlon.x(), 10); // Assuming the z-coordinate is 0
-        // Create a PolyData object and set the points
-        vtkSmartPointer<vtkPolyData> polydata = vtkSmartPointer<vtkPolyData>::New();
-        polydata->SetPoints(vtk_points);
-        polyDataList.push_back(polydata);
+    // update trajectory_lines
+    size_t line_idx = 0;
+    size_t each_point_size = config->simulationDuration / config->recordT;
+    size_t total_points = update_points.size();
+    size_t total_lines = trajectory_lines.size();
 
-        if (((i + 1) % each_point_size) == 0 || i == update_points.size() - 1) 
-        {
-            std::string fileName = std::to_string(file_times) + ".vtp";
-            file_name_vec.push_back(fileName);
-            VTKFileManager::ConnectPointsToOneLine(polyDataList, fileName);
-            polyDataList.clear();
-            file_times++;
+    tbb::parallel_for(size_t(0), total_lines, [&](size_t line_idx) {
+        size_t start_idx = line_idx * each_point_size;
+        size_t end_idx = std::min(start_idx + each_point_size, total_points);
 
-            // 这个点是该采样的最后一个路径点 p
-            last_points.push_back(p);
+        for (size_t i = start_idx; i < end_idx; ++i) {
+            vec3 p = after_write_p[i];
+            trajectory_lines[line_idx].points.push_back(p);
+
+            if (i == end_idx - 1 || i == total_points - 1) {
+                trajectory_lines[line_idx].lastPoint = p;
+            }
         }
-    }
-   
-    // 合并所有生成的 .vtp 文件
-    VTKFileManager::MergeVTPFiles(file_name_vec, config->fileName);
-    // std::cout << "last points size " << last_points.size() << std::endl;
-    return last_points;
+    });
+
+    return trajectory_lines;
 }
 
-
-
-std::vector<CartesianCoord>  MPASOVisualizer::TEST_VisualizeTrajectory(std::vector<CartesianCoord>& points, TrajectorySettings* config, sycl::queue& sycl_Q)
+std::vector<TrajectoryLine> MPASOVisualizer::PathLine(MPASOField* mpasoF, std::vector<CartesianCoord>& points, TrajectorySettings* config, std::vector<int>& default_cell_id, sycl::queue& sycl_Q)
 {
+    
+    std::vector<vec3> stable_points = points; 
+
     std::vector<vec3> update_points;
     if (!update_points.empty()) update_points.clear();
-    update_points.resize(points.size() * (config->simulationDuration / config->recordT));
+    update_points.resize(stable_points.size() * (config->simulationDuration / config->recordT));
 
-    std::cout << "update_points size " << update_points.size() << std::endl;
+    std::cout << "points.size = " << stable_points.size() 
+          << ", default_cell_id.size = " << default_cell_id.size() << std::endl;
 
+    std::vector<TrajectoryLine> trajectory_lines;
+    trajectory_lines.resize(stable_points.size());
+    tbb::parallel_for(size_t(0), stable_points.size(), [&](size_t i) {
+        trajectory_lines[i].lineID = i;
+        trajectory_lines[i].points.push_back(stable_points[i]);
+        trajectory_lines[i].lastPoint = stable_points[i];
+        trajectory_lines[i].duration = config->simulationDuration;
+        trajectory_lines[i].timestamp = config->deltaT;
+        trajectory_lines[i].depth = config->depth;
+    });
+
+   
+    std::vector<size_t> grid_info_vec;
+    // tbl
+    // 0 : mCellsSize
+    // 1 : mEdgesSize
+    // 2 : mMaxEdgesSize
+    // 3 : mVertexSize
+    // 4 : mVertLevels
+    // 5 : mVertLevelsP1
+    grid_info_vec.push_back(mpasoF->mGrid->mCellsSize);
+    grid_info_vec.push_back(mpasoF->mGrid->mEdgesSize);
+    grid_info_vec.push_back(mpasoF->mGrid->mMaxEdgesSize);
+    grid_info_vec.push_back(mpasoF->mGrid->mVertexSize);
+    grid_info_vec.push_back(mpasoF->mGrid->mVertLevels);
+    // grid_info_vec.push_back(mpasoF->mGrid->mVertLevelsP1);
+
+#pragma region sycl_buffer_grid
+    sycl::buffer<vec3, 1> vertexCoord_buf(mpasoF->mGrid->vertexCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->vertexCoord_vec.size())); // CELL 顶点坐标
+    sycl::buffer<vec3, 1> cellCoord_buf(mpasoF->mGrid->cellCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->cellCoord_vec.size()));       // CELL 中心坐标
+    sycl::buffer<size_t, 1> numberVertexOnCell_buf(mpasoF->mGrid->numberVertexOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->numberVertexOnCell_vec.size())); // CELL 有几个顶点
+    sycl::buffer<size_t, 1> verticesOnCell_buf(mpasoF->mGrid->verticesOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->verticesOnCell_vec.size()));             // 
+    sycl::buffer<size_t, 1> cellsOnVertex_buf(mpasoF->mGrid->cellsOnVertex_vec.data(), sycl::range<1>(mpasoF->mGrid->cellsOnVertex_vec.size()));
+    sycl::buffer<size_t, 1> cells_onCell_buf(mpasoF->mGrid->cellsOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->cellsOnCell_vec.size()));
+    sycl::buffer<size_t, 1> grid_info_buf(grid_info_vec.data(), sycl::range<1>(grid_info_vec.size()));
+#pragma endregion   sycl_buffer_grid
+
+
+#pragma region sycl_buffer_velocity
+    sycl::buffer<vec3, 1> cellVertexVelocity_front_buf(mpasoF->mSol_Front->cellVertexVelocity_vec.data(), sycl::range<1>(mpasoF->mSol_Front->cellVertexVelocity_vec.size()));
+    sycl::buffer<double, 1> cellVertexZTop_front_buf(mpasoF->mSol_Front->cellVertexZTop_vec.data(), sycl::range<1>(mpasoF->mSol_Front->cellVertexZTop_vec.size()));
+    sycl::buffer<vec3, 1> cellVertexVelocity_back_buf(mpasoF->mSol_Back->cellVertexVelocity_vec.data(), sycl::range<1>(mpasoF->mSol_Back->cellVertexVelocity_vec.size()));
+    sycl::buffer<double, 1> cellVertexZTop_back_buf(mpasoF->mSol_Back->cellVertexZTop_vec.data(), sycl::range<1>(mpasoF->mSol_Back->cellVertexZTop_vec.size()));
+#pragma endregion sycl_buffer_velocity   
+
+    sycl::buffer<int, 1> cellID_buf(default_cell_id.data(), sycl::range<1>(default_cell_id.size()));
     sycl::buffer<vec3> wirte_points_buf(update_points.data(), sycl::range<1>(update_points.size()));
-    sycl::buffer<vec3> sample_points_buf(points.data(), sycl::range<1>(points.size()));
+    sycl::buffer<vec3> sample_points_buf(stable_points.data(), sycl::range<1>(stable_points.size()));
     sycl_Q.submit([&](sycl::handler& cgh) 
     {
 
+#pragma region sycl_acc_grid
+        auto acc_cellID_buf = cellID_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_vertexCoord_buf = vertexCoord_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellCoord_buf = cellCoord_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_numberVertexOnCell_buf = numberVertexOnCell_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_verticesOnCell_buf = verticesOnCell_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellsOnVertex_buf = cellsOnVertex_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cells_onCell_buf = cells_onCell_buf.get_access<sycl::access::mode::read>(cgh);
+        int grid_cell_size = mpasoF->mGrid->mCellsSize;
+        auto acc_grid_info_buf = grid_info_buf.get_access<sycl::access::mode::read>(cgh);
+#pragma endregion sycl_acc_grid
 
+#pragma region sycl_acc_velocity
+        auto acc_cellVertexVelocity_front_buf = cellVertexVelocity_front_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellVertexZTop_front_buf = cellVertexZTop_front_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellVertexVelocity_back_buf = cellVertexVelocity_back_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellVertexZTop_back_buf = cellVertexZTop_back_buf.get_access<sycl::access::mode::read>(cgh);
+#pragma endregion sycl_acc_velocity
+
+        auto acc_def_cell_id_buf = cellID_buf.get_access<sycl::access::mode::read>(cgh);
         auto acc_wirte_points_buf = wirte_points_buf.get_access<sycl::access::mode::write>(cgh);
         auto acc_sample_points_buf = sample_points_buf.get_access<sycl::access::mode::read_write>(cgh);
 
-        sycl::stream out(4096, 1024, cgh);
-        int times = config->simulationDuration / config->deltaT;
-        std::cout << "times " << times << std::endl;
+        sycl::stream out(1024, 256, cgh);
+        int n_steps = config->simulationDuration / config->deltaT;
         int each_points_size = config->simulationDuration / config->recordT;
         int recordT = config->recordT;
         int deltaT = config->deltaT;
+        float config_depth = config->depth;
 
         
+       
         cgh.parallel_for(sycl::range<1>(points.size()), [=](sycl::item<1> item) 
         {
-
             int global_id = item[0];
-           
+            // load from grid info
+            const int ACTUALL_CELL_SIZE         = (int)acc_grid_info_buf[0];
+            const int ACTUALL_EDGE_SIZE         = (int)acc_grid_info_buf[1];
+            const int ACTUALL_MAX_EDGE_SIZE     = (int)acc_grid_info_buf[2];
+            const int ACTUALL_VERTEX_SIZE       = (int)acc_grid_info_buf[3];
+            const int ACTUALL_ZTOP_LAYER        = (int)acc_grid_info_buf[4];
+            // default
+            const int MAX_VERTEX_NUM            = 20;
+            const int MAX_CELL_NEIGHBOR_NUM     = 21;
+            const int MAX_VERTLEVELS            = 80;
+            const int NEIGHBOR_NUM              = 3;
+            // const int TOTAY_ZTOP_LAYER          = 60;
+            // const int VERTLEVELS                = 60;
+            double fixed_depth                  = -1.0f * config_depth;
 
             double runTime = 0.0;
             int save_times = 0;
             bool bFirstLoop = true;
+            int cell_id_vec[MAX_VERTEX_NUM];
             int base_idx = global_id * each_points_size;
             int update_points_idx = 0;
 
             // 1. 获取point position
             vec3 position; 
+            int cell_id = -1;
             vec3 new_position;
             double pos_x, pos_y, pos_z;
+            int cell_neig_vec[MAX_CELL_NEIGHBOR_NUM];
 
 
-            for (auto times_i = 0; times_i < times; times_i++)
+            if (bFirstLoop == false) {
+                if (cell_id < 0 || cell_id >= acc_numberVertexOnCell_buf.get_range()[0]) {
+                    out << "[Error] cell_id out of range: " << cell_id << sycl::endl;
+                    return;
+                }
+            }
+
+
+            for (auto i_step = 0; i_step < n_steps; i_step++)
             {
-                runTime += deltaT;  
+                double alpha_for_interplate = (double)i_step / (double)n_steps;
+                runTime += deltaT;
                 position = acc_sample_points_buf[global_id];
-                
-                // out << times_i << ":::/" << times << " " << position.x() << " " << position.y() << " " << position.z() << sycl::endl;
-              
-
-                double v_zonal = 2.0; double v_meridional = 0.0;
-                vec3 current_velocity;
-                GeoConverter::convertENUVelocityToXYZ(position, v_zonal, v_meridional, 0.0, current_velocity);
-                
-
-                double r = YOSEF_LENGTH(position);
-                vec3 rotationAxis = computeRotationAxis(position, current_velocity);
-
-                double speed = magnitude(current_velocity);
-                double theta = (speed * deltaT) / r;
-                double thetaInDegrees = theta * (180.0 / 3.141592653589793); // 将弧度转换为角度
-                rotateAroundAxis(position, rotationAxis, thetaInDegrees, pos_x, pos_y, pos_z);
-                
-                new_position = {pos_x, pos_y, pos_z};
-                acc_sample_points_buf[global_id] = new_position;
-                    
-                if ((int)runTime % recordT == 0)
+                int firtst_cell_id = acc_def_cell_id_buf[global_id];
+                // 第一次循环
+                if (bFirstLoop)
                 {
-                    //save .//TODO
-                    out << "save times " << save_times << " " << new_position.x() << " " << new_position.y() << " " << new_position.z() << sycl::endl;
-                    save_times++;
-                    int acc_wirte_pints_idx = base_idx + update_points_idx;
-                    acc_wirte_points_buf[acc_wirte_pints_idx] = new_position;
-                    update_points_idx = update_points_idx + 1;
+                    bFirstLoop = false;
+                    cell_id = firtst_cell_id;
                     
+                    // 找到这个CELL有多少个点
+                    auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
+                    SYCLKernel::GetCellNeighborsIdx(cell_id, current_cell_vertices_number, cell_neig_vec, MAX_VERTEX_NUM, ACTUALL_MAX_EDGE_SIZE, acc_cells_onCell_buf);
+                    
+                    int acc_wirte_pints_idx = base_idx + 0;
+                    acc_wirte_points_buf[acc_wirte_pints_idx] = position;
+                }
+                else
+                {
+                    // 找到这个CELL有多少个点
+                    auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
+                    double max_len = std::numeric_limits<double>::max();
+                    for (auto idx = 0; idx < current_cell_vertices_number + 1; idx++)
+                    {
+                        // 判断当前点 POS 在 哪个CELL 中  -> get new_cell_id
+                        auto CID = cell_neig_vec[idx];
+                        if (CID < 0 || CID >= acc_cellCoord_buf.get_range()[0]) continue;
+                        vec3 pos = acc_cellCoord_buf[CID];
+                        double len = YOSEF_LENGTH(pos - position);
+                        if (len < max_len)
+                        {
+                            max_len = len;
+                            cell_id = CID;
+                        }
+                    }
+                    SYCLKernel::GetCellNeighborsIdx(cell_id, current_cell_vertices_number, cell_neig_vec, MAX_VERTEX_NUM, ACTUALL_MAX_EDGE_SIZE, acc_cells_onCell_buf);
+                   
                 }
 
+                // 判断是否在大陆上
+                vec3 current_position = position;
+                auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
+                size_t current_cell_vertices_idx[MAX_VERTEX_NUM];
+                SYCLKernel::GetCellVerticesIdx(cell_id, current_cell_vertices_number, current_cell_vertices_idx, MAX_VERTEX_NUM, ACTUALL_MAX_EDGE_SIZE, acc_verticesOnCell_buf);
+                bool is_land = SYCLKernel::IsInOcean(cell_id, ACTUALL_MAX_EDGE_SIZE, current_position, acc_numberVertexOnCell_buf, acc_verticesOnCell_buf, acc_vertexCoord_buf);
+                if (is_land)
+                {
+                    continue;
+                }
 
-
-
-            
-               
                 
-                    
+                // 计算当前点 的ZtopFront, ZtopBack
+                double current_point_ztop_front_vec[MAX_VERTLEVELS];
+                double current_point_ztop_back_vec[MAX_VERTLEVELS];
 
+                vec3 current_cell_vertex_pos[MAX_VERTEX_NUM];
+                double current_cell_vertex_weight[MAX_VERTEX_NUM];
+                bool rc = SYCLKernel::GetCellVertexPos(current_cell_vertex_pos, current_cell_vertices_idx, MAX_VERTEX_NUM, current_cell_vertices_number, acc_vertexCoord_buf);
+                if (!rc)
+                {
+                    out << "[ERROR]:: GetCellVertexPos Failed....(VLA < current_cell_vertices_number)" << sycl::endl;
+                    return;
+                }
+                // washpress
+                Interpolator::CalcPolygonWachspress(current_position, current_cell_vertex_pos, current_cell_vertex_weight, current_cell_vertices_number);
+
+                int ztop_range_front = acc_cellVertexZTop_front_buf.get_range()[0];
+                int vel_range_front = acc_cellVertexVelocity_front_buf.get_range()[0];
+                int ztop_range_back = acc_cellVertexZTop_back_buf.get_range()[0];
+                int vel_range_back = acc_cellVertexVelocity_back_buf.get_range()[0];
+
+                for (auto k = 0; k < ACTUALL_ZTOP_LAYER; ++k)
+                {
+                    double current_point_ztop_in_layer_front = 0.0;
+                    double current_point_ztop_in_layer_back = 0.0;
+                    // 获取每个顶点的ztop
+                    double current_cell_vertex_ztop_front[MAX_VERTEX_NUM];
+                    double current_cell_vertex_ztop_back[MAX_VERTEX_NUM];
+                    for (auto v_idx = 0; v_idx < current_cell_vertices_number; v_idx++)
+                    {
+                        auto VID = current_cell_vertices_idx[v_idx];
+                        if (VID < 0 || VID >= acc_vertexCoord_buf.get_range()[0]) {
+                            out << "[ERROR] Invalid VID: " << VID << sycl::endl;
+                            return;
+                        }
+
+                        double ztop_front = acc_cellVertexZTop_front_buf[VID * ACTUALL_ZTOP_LAYER + k];
+                        double ztop_back = acc_cellVertexZTop_back_buf[VID * ACTUALL_ZTOP_LAYER + k];
+                        current_cell_vertex_ztop_front[v_idx] = ztop_front;
+                        current_cell_vertex_ztop_back[v_idx] = ztop_back;
+                    }
+                    // 计算当前点的ZTOP
+                    for (auto v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx)
+                    {
+                        current_point_ztop_in_layer_front += current_cell_vertex_weight[v_idx] * current_cell_vertex_ztop_front[v_idx];
+                        current_point_ztop_in_layer_back += current_cell_vertex_weight[v_idx] * current_cell_vertex_ztop_back[v_idx];
+                    }
+                    current_point_ztop_front_vec[k] = current_point_ztop_in_layer_front;
+                    current_point_ztop_back_vec[k] = current_point_ztop_in_layer_back;
+
+                }
+
+                const double EPSILON = 1e-6;
+                int local_layer_front = 0;
+                int local_layer_back = 0;
+                for (auto k = 1; k < ACTUALL_ZTOP_LAYER; ++k)
+                {
+                    if (fixed_depth <= current_point_ztop_front_vec[k - 1] - EPSILON && fixed_depth >= current_point_ztop_front_vec[k] + EPSILON)
+                    {
+                        local_layer_front = k;
+                        break;
+                    }
+                }
+                for (auto k = 1; k < ACTUALL_ZTOP_LAYER; ++k)
+                {
+                    if (fixed_depth <= current_point_ztop_back_vec[k - 1] - EPSILON && fixed_depth >= current_point_ztop_back_vec[k] + EPSILON)
+                    {
+                        local_layer_back = k;
+                        break;
+                    }
+                }
+            
                
-            
-            
-            
+                if (local_layer_front == 0 || local_layer_back == 0)
+                {
+                    acc_sample_points_buf[global_id] = current_position;
+                    continue;
+                }
+                else
+                {
+                    // 计算当前点的速度
+                    double ztop_layer1, ztop_layer2, ztop_layer3, ztop_layer4;
+                    ztop_layer1 = current_point_ztop_front_vec[local_layer_front];      // lower
+                    ztop_layer2 = current_point_ztop_front_vec[local_layer_front - 1];  // upper
+
+                    ztop_layer3 = current_point_ztop_back_vec[local_layer_back];        // lower
+                    ztop_layer4 = current_point_ztop_back_vec[local_layer_back - 1];    // upper
+                    double t_front = (sycl::fabs(fixed_depth) - sycl::fabs(ztop_layer1)) / (sycl::fabs(ztop_layer2) - sycl::fabs(ztop_layer1));
+                    double t_back = (sycl::fabs(fixed_depth) - sycl::fabs(ztop_layer3)) / (sycl::fabs(ztop_layer4) - sycl::fabs(ztop_layer3));
+                    
+                    
+                    vec3 final_vel_front;
+                    vec3 final_vel_back;
+                   
+                    // lower_front
+                    vec3 current_point_vel1_front = SYCLKernel::CalcVelocity(current_cell_vertices_idx, current_cell_vertex_weight, 
+                        MAX_VERTEX_NUM, current_cell_vertices_number, ACTUALL_ZTOP_LAYER, local_layer_front, acc_cellVertexVelocity_front_buf);
+                    // upper_front
+                    vec3 current_point_vel2_front = SYCLKernel::CalcVelocity(current_cell_vertices_idx, current_cell_vertex_weight, 
+                        MAX_VERTEX_NUM, current_cell_vertices_number, ACTUALL_ZTOP_LAYER, local_layer_front - 1, acc_cellVertexVelocity_front_buf);
+                    
+                    final_vel_front.x() = t_front * current_point_vel2_front.x() + (1 - t_front) * current_point_vel1_front.x();
+                    final_vel_front.y() = t_front * current_point_vel2_front.y() + (1 - t_front) * current_point_vel1_front.y();
+                    final_vel_front.z() = t_front * current_point_vel2_front.z() + (1 - t_front) * current_point_vel1_front.z();
+
+                    vec3 current_point_vel1_back = SYCLKernel::CalcVelocity(current_cell_vertices_idx, current_cell_vertex_weight, 
+                        MAX_VERTEX_NUM, current_cell_vertices_number, ACTUALL_ZTOP_LAYER, local_layer_back, acc_cellVertexVelocity_back_buf);
+                
+                    vec3 current_point_vel2_back = SYCLKernel::CalcVelocity(current_cell_vertices_idx, current_cell_vertex_weight, 
+                        MAX_VERTEX_NUM, current_cell_vertices_number, ACTUALL_ZTOP_LAYER, local_layer_back - 1, acc_cellVertexVelocity_back_buf);
+                    
+                    final_vel_back.x() = t_back * current_point_vel2_back.x() + (1 - t_back) * current_point_vel1_back.x();
+                    final_vel_back.y() = t_back * current_point_vel2_back.y() + (1 - t_back) * current_point_vel1_back.y();
+                    final_vel_back.z() = t_back * current_point_vel2_back.z() + (1 - t_back) * current_point_vel1_back.z();
+
+
+                    vec3 current_velocity = alpha_for_interplate * final_vel_back + (1 - alpha_for_interplate) * final_vel_front;
+
+                    double r = YOSEF_LENGTH(current_position);
+                    vec3 rotationAxis = SYCLKernel::CalcRotationAxis(current_position, current_velocity);
+                    double speed = YOSEF_LENGTH(current_velocity);
+                    double theta_rad = (speed * deltaT) / r;
+                    new_position = SYCLKernel::CalcPositionAfterRotation(current_position, rotationAxis, theta_rad);
+                   
+
+                    acc_sample_points_buf[global_id] = new_position;
+                    
+                    if ((i_step + 1) % (recordT / deltaT) == 0)
+                    {
+                        // //save .//TODO
+                        int acc_wirte_pints_idx = base_idx + update_points_idx;
+                        acc_wirte_points_buf[acc_wirte_pints_idx] = new_position;
+                        update_points_idx = update_points_idx + 1;
+                    }
+                    
+                } 
             }
         });
-       
+        
+      
     });
-    sycl_Q.wait();
+    try {
+        sycl_Q.wait();
+    } catch (sycl::exception const& e) {
+        std::cerr << "Caught SYCL exception: " << e.what() << std::endl;
+        std::exit(1);
+    }
 
     Debug("[VisualizeTrajectory]::Finished...");
-    // auto after_p = sample_points_buf.get_access<sycl::access::mode::read>(); 
-    auto after_p = sample_points_buf.get_host_access(sycl::read_only);
     // auto after_write_p = wirte_points_buf.get_access<sycl::access::mode::read>();
-    auto after_write_p = wirte_points_buf.get_host_access(sycl::read_only);
+    auto after_write_p = wirte_points_buf.get_host_access(sycl::read_only); // XYZ
     std::vector<CartesianCoord> last_points;
-   
+    
 
-    //Save
-    vec3 p = after_write_p[update_points.size() - 1];
-    vec2 new_latlon;
-    GeoConverter::convertXYZToLatLonDegree(p, new_latlon);
-    std::cout << "last point [lat lon] " << new_latlon.x() << " " << new_latlon.y() << std::endl;
-    std::cout << "last point (x y z) " << p.x() << " " << p.y() << " " << p.z() << std::endl;
-    
-    
-    
-    return last_points;
+    // update trajectory_lines
+    size_t line_idx = 0;
+    size_t each_point_size = config->simulationDuration / config->recordT;
+    size_t total_points = update_points.size();
+    size_t total_lines = trajectory_lines.size();
+
+    tbb::parallel_for(size_t(0), total_lines, [&](size_t line_idx) {
+        size_t start_idx = line_idx * each_point_size;
+        size_t end_idx = std::min(start_idx + each_point_size, total_points);
+
+        for (size_t i = start_idx; i < end_idx; ++i) {
+            vec3 p = after_write_p[i];
+            trajectory_lines[line_idx].points.push_back(p);
+
+            if (i == end_idx - 1 || i == total_points - 1) {
+                trajectory_lines[line_idx].lastPoint = p;
+            }
+        }
+    });
+
+    return trajectory_lines;
 }
+
+
+
+

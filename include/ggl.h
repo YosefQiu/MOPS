@@ -27,7 +27,6 @@
 #include <numbers>
 #include <cmath>
 #include <filesystem>
-#include <chrono>
 
 
 
@@ -70,6 +69,7 @@
     #include <vtkNamedColors.h>
     #include <vtkNew.h>
     #include <vtkProperty.h>
+    #include <vtkDoubleArray.h>
     #include <vtkRenderWindow.h>
     #include <vtkRenderWindowInteractor.h>
     #include <vtkRenderer.h>
@@ -98,6 +98,7 @@
 
 #if LOADING_SYCL == 1
     #include <sycl/sycl.hpp>
+    // #include <sycl/ext/intel/math.hpp>
 
     using vec2 = sycl::double2;
     using vec3 = sycl::double3;
@@ -138,6 +139,13 @@ using CartesianCoord = vec3;
     #define YOSEF_VEC3_MIN(a, b)    sycl::float3(std::min((a).x(), (b).x()), std::min((a).y(), (b).y()), std::min((a).z(), (b).z()))
     #define YOSEF_VEC3_MAX(a, b)    sycl::float3(std::max((a).x(), (b).x()), std::max((a).y(), (b).y()), std::max((a).z(), (b).z()))
     #define YOSEF_LENGTH(v)         std::sqrt((v).x() * (v).x() + (v).y() * (v).y() + (v).z() * (v).z())
+    #define YOSEF_VEC3_NORMALIZE(v)     \
+    do {                                \
+        double _len = YOSEF_LENGTH(v);  \
+        (v).x() /= _len;         \
+        (v).y() /= _len;         \
+        (v).z() /= _len;         \
+    } while(0) 
     #define PRINT_VEC3(v)           std::cout << #v << ": (" << (v).x() << ", " << (v).y() << ", " << (v).z() << ")" << std::endl
     #define PRINT_VEC2(v)           std::cout << #v << ": (" << (v).x() << ", " << (v).y() << ")" << std::endl
     #define PRINT_DOUBLE(v)         std::cout << #v << ": " << v << std::endl

@@ -3,71 +3,106 @@
 #include "ImageBuffer.hpp"
 #include "GeoConverter.hpp"
 #include "MPASOField.h"
+#include <vector>
 
-enum class CalcPositionType : int { kCenter, kVertx, kPoint, kCount };
-enum class CalcAttributeType : int { kZonalMerimoal, kVelocity, kZTop, kCount };
-enum class VisualizeType : int {kFixedLayer, kFixedDepth};
-
-struct VisualizationSettings
+namespace MOPS
 {
-    vec2 imageSize;
-    vec2 LonRange;
+    enum class CalcPositionType : int { kCenter, kVertx, kPoint, kCount };
+    enum class CalcAttributeType : int { kZonalMerimoal, kVelocity, kZTop, kTemperature, kSalinity, kAll, kCount };
+    enum class VisualizeType : int {kFixedLayer, kFixedDepth};
+    enum class SaveType : int {kVTI, kNone, kCount};
 
-    vec2 LatRange;
-    
-    vec2 DepthRange;
-    double FixedLatitude;
-    union
+    struct VisualizationSettings
     {
-        double FixedDepth;
-        double FixedLayer;
+        vec2 imageSize;
+        vec2 LonRange;
+
+        vec2 LatRange;
+        
+        vec2 DepthRange;
+        double FixedLatitude;
+        union
+        {
+            double FixedDepth;
+            double FixedLayer;
+        };
+        int tile_index;
+        CalcAttributeType CalcType = CalcAttributeType::kZonalMerimoal;
+        CalcPositionType PositionType = CalcPositionType::kPoint;
+        VisualizeType VisType = VisualizeType::kFixedDepth;
+        SaveType SaveType = SaveType::kNone;
+        double TimeStep;
+        VisualizationSettings() = default;
+
     };
-    CalcAttributeType CalcType = CalcAttributeType::kVelocity;
-    CalcPositionType PositionType = CalcPositionType::kPoint;
-    VisualizeType VisType;
 
-    double TimeStep;
-    VisualizationSettings() = default;
+    struct SamplingSettings 
+    {
+    public:
+        SamplingSettings() = default;
 
-};
+        void setSampleRange(const vec2i& number) { sampleRange = number; }
+        void setGeoBox(const vec2& latRange, const vec2& lonRange) { sampleLatitudeRange = latRange; sampleLongitudeRange = lonRange; }
+        void setDepth(double depth) { sampleDepth = depth; }
+        void setSamplingRegion(const vec2i& number, const vec2& latRange, const vec2& lonRange, double depth) { sampleRange = number; sampleLatitudeRange = latRange; sampleLongitudeRange = lonRange; sampleDepth = depth; }
 
-struct SamplingSettings
-{
-    vec2i sampleNumer;
-    vec2 sampleLatitudeRange;
-    vec2 sampleLongitudeRange;
-    double sampleDepth;
-};
+        vec2i getSampleRange() const { return sampleRange; }
+        vec2 getLatitudeRange() const { return sampleLatitudeRange; }
+        vec2 getLongitudeRange() const { return sampleLongitudeRange; }
+        double getDepth() const { return sampleDepth; }
 
-#define ONE_SECOND  1
-#define ONE_MINUTE  60
-#define ONE_HOUR    60 * 60
-#define ONE_DAY     60 * 60 * 24
-#define ONE_MONTH   60 * 60 * 24 * 30
-#define ONE_YEAR    60 * 60 * 24 * 30 * 12 
+    private:
+        vec2i sampleRange;
+        vec2 sampleLatitudeRange;
+        vec2 sampleLongitudeRange;
+        double sampleDepth = 0.0;
+    };
 
-struct TrajectorySettings
-{
-    size_t deltaT;   // 相隔多少秒计算一次 新的位置
-    size_t simulationDuration; //要模拟的总时长
-    size_t recordT; // 相隔多少秒存储一次 新的位置
-    float depth;
-    std::string fileName;
-};
+    struct TrajectoryLine
+    {
+        int lineID;
+        std::vector<CartesianCoord> points;
+        CartesianCoord lastPoint;
+        double duration;
+        double timestamp;
+        double depth;
+    };
 
-class MPASOVisualizer
-{
-public:
-    static void VisualizeFixedLayer(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, sycl::queue& sycl_Q);
-    static void VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, sycl::queue& sycl_Q);
-    [[deprecated]] static void VisualizeFixedLatitude(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, sycl::queue& sycl_Q);
-    static void GenerateSamplePoint(std::vector<CartesianCoord>& points, SamplingSettings* config);
-    static void GenerateGaussianSpherePoints(std::vector<CartesianCoord>& points, SamplingSettings* config, int numPoints, double meanLat, double meanLon, double stdDev);
-    static std::vector<CartesianCoord>  VisualizeTrajectory(MPASOField* mpasoF, std::vector<CartesianCoord>& points, TrajectorySettings* config, std::vector<int>& default_cell_id, sycl::queue& sycl_Q);
+    #define ONE_SECOND  1
+    #define ONE_MINUTE  60
+    #define ONE_HOUR    60 * 60
+    #define ONE_DAY     60 * 60 * 24
+    #define ONE_MONTH   60 * 60 * 24 * 30
+    #define ONE_YEAR    60 * 60 * 24 * 30 * 12 
 
-    static void VisualizeFixedLayer_TimeVarying(int width, int height, ImageBuffer<double>* img1, ImageBuffer<double>* img2, float time1, float time2, float time, sycl::queue& sycl_Q);
-  
-    static std::vector<CartesianCoord>  TEST_VisualizeTrajectory(std::vector<CartesianCoord>& points, TrajectorySettings* config, sycl::queue& sycl_Q);
+    struct TrajectorySettings
+    {
+        size_t deltaT;   // 相隔多少秒计算一次 新的位置
+        size_t simulationDuration; //要模拟的总时长
+        size_t recordT; // 相隔多少秒存储一次 新的位置
+        float depth;
+        std::string fileName;
+    };
 
-};
+    class MPASOVisualizer
+    {
+    public:
+        static void VisualizeFixedLayer(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, sycl::queue& sycl_Q);
+        static void VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSettings* config, std::vector<ImageBuffer<double>>& img_vec, sycl::queue& sycl_Q);
+        static void VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, sycl::queue& sycl_Q);
+        [[deprecated]] static void VisualizeFixedLatitude(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, sycl::queue& sycl_Q);
+        static void GenerateSamplePoint(std::vector<CartesianCoord>& points, SamplingSettings* config);
+        static void GenerateGaussianSpherePoints(std::vector<CartesianCoord>& points, SamplingSettings* config, int numPoints, double meanLat, double meanLon, double stdDev);
+        static std::vector<TrajectoryLine> StreamLine(MPASOField* mpasoF, std::vector<CartesianCoord>& points, TrajectorySettings* config, std::vector<int>& default_cell_id, sycl::queue& sycl_Q);
+        static std::vector<TrajectoryLine> PathLine(MPASOField* mpasoF, std::vector<CartesianCoord>& points, TrajectorySettings* config, std::vector<int>& default_cell_id, sycl::queue& sycl_Q);
 
+
+
+        static void VisualizeFixedLayer_TimeVarying(int width, int height, ImageBuffer<double>* img1, ImageBuffer<double>* img2, float time1, float time2, float time, sycl::queue& sycl_Q);
+    
+        static std::vector<CartesianCoord>  TEST_VisualizeTrajectory(std::vector<CartesianCoord>& points, TrajectorySettings* config, sycl::queue& sycl_Q);
+
+    };
+
+
+}

@@ -1,5 +1,6 @@
 #include "SYCLKernel.h"
 
+using namespace MOPS;
 
 void SYCLKernel::SearchKDTree(int* cell_id_vec, MPASOGrid* grid, int width, int height, double minLat, double maxLat, double minLon, double maxLon)
 {
@@ -20,6 +21,7 @@ void SYCLKernel::SearchKDTree(int* cell_id_vec, MPASOGrid* grid, int width, int 
     }
 }
 
+SYCL_EXTERNAL
 void SYCLKernel::GetCellVerticesIdx(int cell_id, int current_cell_vertices_number, size_t* current_cell_vertices_idx, const int VLA, const int max_edge,
         sycl::accessor<size_t, 1, sycl::access::mode::read> acc_verticesOnCell_buf)
 {
@@ -35,7 +37,7 @@ void SYCLKernel::GetCellVerticesIdx(int cell_id, int current_cell_vertices_numbe
         current_cell_vertices_idx[k] = nan;
     }
 }
-
+SYCL_EXTERNAL
 bool SYCLKernel::IsInOcean(int cell_id, int max_edge, vec3 current_position, 
         sycl::accessor<size_t, 1, sycl::access::mode::read> acc_numberVertexOnCell_buf,
         sycl::accessor<size_t, 1, sycl::access::mode::read> acc_verticesOnCell_buf, 
@@ -89,6 +91,24 @@ bool SYCLKernel::IsInOcean(int cell_id, int max_edge, vec3 current_position,
     return is_land;
 }
 
+SYCL_EXTERNAL
+        void SYCLKernel::GetCellNeighborsIdx(int cell_id, int current_cell_vertices_number, int* current_cell_neighbors_idx, const int VLA, const int max_edge,
+                                        sycl::accessor<size_t, 1, sycl::access::mode::read> acc_cells_onCell_buf)
+{
+    if (current_cell_vertices_number > VLA) return;
+    current_cell_neighbors_idx[0] = cell_id;
+    for (auto k = 1; k < current_cell_vertices_number; k++)
+    {
+        int negi_cell_id = acc_cells_onCell_buf[max_edge * cell_id + k];
+        current_cell_neighbors_idx[k] = negi_cell_id - 1;
+    }
+    for (auto k = current_cell_vertices_number; k < VLA; k++)
+    {
+        current_cell_neighbors_idx[k] = -1;
+    }
+
+}
+SYCL_EXTERNAL
 bool SYCLKernel::GetCellVertexPos(vec3* current_cell_vertex_pos, size_t* current_cell_vertices_idx, const int VLA, int current_cell_vertices_number, sycl::accessor<vec3, 1, sycl::access::mode::read> acc_vertexCoord_buf)
 {
     if (current_cell_vertices_number > VLA)
@@ -109,7 +129,7 @@ bool SYCLKernel::GetCellVertexPos(vec3* current_cell_vertex_pos, size_t* current
     }
     return true;
 }
-
+SYCL_EXTERNAL
 vec3 SYCLKernel::CalcVelocity(size_t* current_cell_vertices_idx, double* current_cell_vertex_weight, 
             const int VLA, int current_cell_vertices_number, int TOTAY_ZTOP_LAYER, int layer,
             sycl::accessor<vec3, 1, sycl::access::mode::read> acc_cellVertexVelocity_buf)
@@ -134,4 +154,68 @@ vec3 SYCLKernel::CalcVelocity(size_t* current_cell_vertices_idx, double* current
         current_point_vel1.z() += current_cell_vertex_weight[v_idx] * vertex_vel1[v_idx].z();
     }
     return current_point_vel1;
+}
+SYCL_EXTERNAL
+double SYCLKernel::CalcAttribute(size_t* current_cell_vertices_idx, double* current_cell_vertex_weight, 
+                                    const int VLA, int current_cell_vertices_number, int TOTAY_ZTOP_LAYER, int layer,
+                                    sycl::accessor<double, 1, sycl::access::mode::read> acc_cellAttribute_buf)
+{
+    double current_point_attr_value = 0.0;
+    const int VLA_SIZE = 20;
+    double vertex_value1[VLA_SIZE];
+    for (auto v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx)
+    {
+        auto VID = current_cell_vertices_idx[v_idx];
+        double value1 = acc_cellAttribute_buf[VID * TOTAY_ZTOP_LAYER + layer]; 
+        vertex_value1[v_idx] = value1;
+    }
+    for (auto v_idx = current_cell_vertices_number; v_idx < VLA_SIZE; v_idx++)
+    {
+        vertex_value1[v_idx] = 0.0;
+    }
+    for (auto v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx)
+    {
+        current_point_attr_value += current_cell_vertex_weight[v_idx] * vertex_value1[v_idx];
+    }
+    return current_point_attr_value;
+}
+
+SYCL_EXTERNAL
+vec3 SYCLKernel::CalcRotationAxis(const vec3& position, const vec3& velocity)
+{
+    vec3 axis;
+    axis.x() = position.y() * velocity.z() - position.z() * velocity.y();
+    axis.y() = position.z() * velocity.x() - position.x() * velocity.z();
+    axis.z() = position.x() * velocity.y() - position.y() * velocity.x();
+    return axis;
+}
+
+SYCL_EXTERNAL
+vec3 SYCLKernel::CalcPositionAfterRotation(const vec3& position, const vec3& axis, double theta_rad)
+{
+    double thetaRad = theta_rad;
+    double cosTheta = sycl::cos(thetaRad);
+    double sinTheta = sycl::sin(thetaRad);
+
+    // normalize
+    double tmp_length = YOSEF_LENGTH(axis);
+    vec3 u;
+    u.x() = axis.x() / tmp_length;
+    u.y() = axis.y() / tmp_length;
+    u.z() = axis.z() / tmp_length;
+
+    vec3 rotated;
+    rotated.x() = (cosTheta + u.x() * u.x() * (1.0 - cosTheta)) * position.x() +
+        (u.x() * u.y() * (1.0 - cosTheta) - u.z() * sinTheta) * position.y() +
+        (u.x() * u.z() * (1.0 - cosTheta) + u.y() * sinTheta) * position.z();
+
+    rotated.y() = (u.y() * u.x() * (1.0 - cosTheta) + u.z() * sinTheta) * position.x() +
+        (cosTheta + u.y() * u.y() * (1.0 - cosTheta)) * position.y() +
+        (u.y() * u.z() * (1.0 - cosTheta) - u.x() * sinTheta) * position.z();
+
+    rotated.z() = (u.z() * u.x() * (1.0 - cosTheta) - u.y() * sinTheta) * position.x() +
+        (u.z() * u.y() * (1.0 - cosTheta) + u.x() * sinTheta) * position.y() +
+        (cosTheta + u.z() * u.z() * (1.0 - cosTheta)) * position.z();
+
+    return rotated;
 }

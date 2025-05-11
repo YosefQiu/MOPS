@@ -3,6 +3,19 @@
 #include "GeoConverter.hpp"
 #include "SYCLKernel.h"
 
+
+using namespace MOPS;
+
+void MPASOSolution::initSolution_DemoLoading(const char* yaml_path, int timestep)
+{
+    std::shared_ptr<ftk::stream> stream(new ftk::stream);
+	stream->parse_yaml(yaml_path);
+	auto vel_path = stream->substreams[1]->filenames[0];
+	this->gt = stream->read(timestep);
+    this->initSolution(this->gt.get(), MOPS::MPASOReader::readSolInfo(vel_path, timestep).get());
+
+}
+
 [[deprecated]]
 void MPASOSolution::initSolution(MPASOReader* reader)
 {
@@ -44,13 +57,16 @@ void MPASOSolution::initSolution(ftk::ndarray_group* g, MPASOReader* reader)
    
     std::cout << "          [ timestep = " << this->mCurrentTime << " ]\n";
     copyFromNdarray_Double(g, "bottomDepth", this->cellBottomDepth_vec);
-    copyFromNdarray_Double(g, "timeMonthly_avg_velocityZonal", this->cellZonalVelocity_vec);
-    copyFromNdarray_Double(g, "timeMonthly_avg_velocityMeridional", this->cellMeridionalVelocity_vec);
-    copyFromNdarray_Double(g, "timeMonthly_avg_layerThickness", this->cellLayerThickness_vec);
+    copyFromNdarray_Double(g, "velocityZonal", this->cellZonalVelocity_vec);
+    copyFromNdarray_Double(g, "velocityMeridional", this->cellMeridionalVelocity_vec);
+    copyFromNdarray_Double(g, "layerThickness", this->cellLayerThickness_vec);
     copyFromNdarray_Double(g, "timeMonthly_avg_zTop", this->cellZTop_vec);
-    copyFromNdarray_Double(g, "timeMonthly_avg_normalVelocity", this->cellNormalVelocity_vec);
-    copyFromNdarray_Char(g, "xtime_startMonthly", time_vec_s);
-    copyFromNdarray_Char(g, "xtime_endMonthly", time_vec_e);
+    copyFromNdarray_Double(g, "normalVelocity", this->cellNormalVelocity_vec);
+
+   
+    
+    // copyFromNdarray_Char(g, "xtime_startMonthly", time_vec_s);
+    // copyFromNdarray_Char(g, "xtime_endMonthly", time_vec_e);
 
 
     // std::cout << "time_vec_s.size() = " << time_vec_s.size() << std::endl;
@@ -77,6 +93,40 @@ void MPASOSolution::initSolution(ftk::ndarray_group* g, MPASOReader* reader)
     // //ReadVertVelocityTop(timestep, cellVertVelocity_vec);
 }
 
+
+void MPASOSolution::addAttribute(std::string name, AttributeFormat type)
+{
+    if (this->gt == nullptr)
+    {
+        std::cout << "gt is not initialized" << std::endl;
+        return;
+    }
+
+    if (type == AttributeFormat::kDouble)
+    {
+        std::vector<double> vec;
+        copyFromNdarray_Double(this->gt.get(), name, vec);
+        this->mDoubleAttributes[name] = vec;
+    }
+    else if (type == AttributeFormat::kFloat)
+    {
+        std::vector<double> vec;
+        copyFromNdarray_Double(this->gt.get(), name, vec);
+        this->mDoubleAttributes[name] = vec;
+    }
+    else if (type == AttributeFormat::kChar)
+    {
+        std::vector<char> vec;
+        copyFromNdarray_Char(this->gt.get(), name, vec);
+        this->mCharAttributes[name] = vec;
+    }
+    else if (type == AttributeFormat::kVec3)
+    {
+        std::cout << "kVec3 is not supported temporarily" << std::endl;
+    }
+
+   
+}
 void MPASOSolution::getCellVelocity(const size_t cell_id, const size_t level, std::vector<vec3>& cell_on_velocity, vec3& vel)
 {
     auto VertLevels = mVertLevels;
@@ -354,7 +404,7 @@ void MPASOSolution::calcCellVertexZtop(MPASOGrid* grid, std::string& dataDir, sy
     if (!cellVertexZTop_vec.empty()) cellVertexZTop_vec.clear();
     cellVertexZTop_vec.resize(grid->vertexCoord_vec.size() * mTotalZTopLayer);
 
-    auto cell_vertex_ztop_path = dataDir + "/" + "cellVertexZTop_vec.bin";
+    auto cell_vertex_ztop_path = dataDir + "/" + "cellVertexZTop_vec_"  + std::to_string(mCurrentTime) + ".bin";
 
     if (std::filesystem::exists(cell_vertex_ztop_path)) {
         readVertexZTopFromFile<double>(cellVertexZTop_vec, cell_vertex_ztop_path);
@@ -499,6 +549,155 @@ void MPASOSolution::calcCellVertexZtop(MPASOGrid* grid, std::string& dataDir, sy
 #endif
   
 }
+
+
+void MPASOSolution::calcCellCenterToVertex(const std::string& name, const std::vector<double>& vec, MPASOGrid* grid, std::string& dataDir, sycl::queue& q)
+{
+    if (vec.empty()) return;
+    if (mTotalZTopLayer == 0 || mTotalZTopLayer == -1) mTotalZTopLayer = mVertLevels;
+    std::vector<double> attr_CtoV_vec;
+    attr_CtoV_vec.resize(grid->vertexCoord_vec.size() * mTotalZTopLayer);
+
+    auto cell_vertex_attribute_path = dataDir + "/" + "cellVertex" + name + "_vec_"  + std::to_string(mCurrentTime) + ".bin";
+
+    if (std::filesystem::exists(cell_vertex_attribute_path)) {
+        readVertexZTopFromFile<double>(attr_CtoV_vec, cell_vertex_attribute_path);
+        mDoubleAttributes_CtoV[name] = attr_CtoV_vec;
+        return;
+    }
+
+    std::vector<size_t> grid_info_vec;
+    // tbl
+    // 0 : mCellsSize
+    // 1 : mEdgesSize
+    // 2 : mMaxEdgesSize
+    // 3 : mVertexSize
+    // 4 : mVertLevels
+    // 5 : mVertLevelsP1
+    grid_info_vec.push_back(grid->mCellsSize);
+    grid_info_vec.push_back(grid->mEdgesSize);
+    grid_info_vec.push_back(grid->mMaxEdgesSize);
+    grid_info_vec.push_back(grid->mVertexSize);
+    grid_info_vec.push_back(grid->mVertLevels);
+    grid_info_vec.push_back(grid->mVertLevelsP1);
+    
+#if USE_SYCL
+    sycl::buffer<vec3, 1> vertexCoord_buf(grid->vertexCoord_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size())); // CELL 顶点坐标
+    sycl::buffer<vec3, 1> cellCoord_buf(grid->cellCoord_vec.data(), sycl::range<1>(grid->cellCoord_vec.size()));       // CELL 中心坐标
+
+    sycl::buffer<size_t, 1> numberVertexOnCell_buf(grid->numberVertexOnCell_vec.data(), sycl::range<1>(grid->numberVertexOnCell_vec.size())); // CELL 有几个顶点
+    sycl::buffer<size_t, 1> verticesOnCell_buf(grid->verticesOnCell_vec.data(), sycl::range<1>(grid->verticesOnCell_vec.size()));             // 
+    sycl::buffer<size_t, 1> cellsOnVertex_buf(grid->cellsOnVertex_vec.data(), sycl::range<1>(grid->cellsOnVertex_vec.size()));
+
+    sycl::buffer<double, 1> cellCenterAttr_buf(vec.data(), sycl::range<1>(vec.size()));                           //CELL 中心
+    sycl::buffer<double, 1> cellVertexAttr_buf(attr_CtoV_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size() * mTotalZTopLayer));        //CELL 顶点ZTOP （要求的）
+  
+    sycl::buffer<size_t, 1> grid_info_buf(grid_info_vec.data(), sycl::range<1>(grid_info_vec.size())); 
+
+    q.submit([&](sycl::handler& cgh) {
+        
+        auto acc_vertexCoord_buf        = vertexCoord_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellCoord_buf          = cellCoord_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_numberVertexOnCell_buf = numberVertexOnCell_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_verticesOnCell_buf     = verticesOnCell_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellsOnVertex_buf      = cellsOnVertex_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellCenterAttr_buf     = cellCenterAttr_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellVertexAttr_buf     = cellVertexAttr_buf.get_access<sycl::access::mode::read_write>(cgh);
+        auto acc_grid_info_buf          = grid_info_buf.get_access<sycl::access::mode::read>(cgh);
+        
+        
+        cgh.parallel_for(sycl::range<2>(mCellsSize, mTotalZTopLayer), [=](sycl::id<2> idx) {
+            size_t j = idx[0];
+            size_t i = idx[1]; 
+
+            auto cell_id = j;
+            auto current_layer = i;
+
+            const int CELL_SIZE = acc_grid_info_buf[0]; 
+            const int max_edge = acc_grid_info_buf[2];
+            const int MAX_VERTEX_NUM = 20;
+            const int NEIGHBOR_NUM = 3;
+            const int TOTAY_ZTOP_LAYER = acc_grid_info_buf[4];
+            const int VERTLEVELS = acc_grid_info_buf[4];
+            // 1. 找出这个cell 的所有顶点 不存在的置为nan
+            
+            // 1.1 计算这个CELL 有多少个顶点
+            auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
+            auto nan = std::numeric_limits<size_t>::max();
+            // 1.2 找出所有候选顶点
+            size_t current_cell_vertices_idx[MAX_VERTEX_NUM];
+            SYCLKernel::GetCellVerticesIdx(cell_id, current_cell_vertices_number, current_cell_vertices_idx, MAX_VERTEX_NUM, max_edge, acc_verticesOnCell_buf);
+            // =============================== 找到max_edges个顶点
+            double current_cell_vertices_value[MAX_VERTEX_NUM];
+            bool bBoundary = false;
+            for (auto k = 0; k < MAX_VERTEX_NUM; ++k)
+            {
+                auto vertex_idx = current_cell_vertices_idx[k];
+                // 2.1 如果是nan 跳过
+                if (vertex_idx == nan) { current_cell_vertices_value[k] = std::numeric_limits<double>::quiet_NaN(); continue; }
+                auto current_vertex = acc_vertexCoord_buf[vertex_idx];
+                // 2.2 如果不是nan 找到含有这个顶点的3个cell id(候选) **边界情况没有3个**
+                size_t tmp_cell_id[3];
+                tmp_cell_id[0] = acc_cellsOnVertex_buf[3 * vertex_idx + 0] - 1;
+                tmp_cell_id[1] = acc_cellsOnVertex_buf[3 * vertex_idx + 1] - 1;
+                tmp_cell_id[2] = acc_cellsOnVertex_buf[3 * vertex_idx + 2] - 1;
+                // 2.3 找到这3个CELL 的中心attribute value
+                double tmp_cell_center_attr[3];
+                for (auto tmp_cell = 0; tmp_cell < NEIGHBOR_NUM; tmp_cell++)
+                {
+                    double value;
+                    if (tmp_cell_id[tmp_cell] > CELL_SIZE + 1)
+                    {
+                        value = 0.0;
+                        tmp_cell_center_attr[tmp_cell] = value;
+                        bBoundary = true;
+                    }
+                    else
+                    {
+                        double attr;
+                        auto attr_idx = VERTLEVELS * tmp_cell_id[tmp_cell] + current_layer;
+                        attr = acc_cellCenterAttr_buf[attr_idx];
+                        tmp_cell_center_attr[tmp_cell] = attr;
+                    }
+                }
+                // 2.4 如果是边界点
+                if (bBoundary)
+                {
+                    current_cell_vertices_value[k] = 0.0 * tmp_cell_center_attr[0] + 0.0 * tmp_cell_center_attr[1] + 0.0 * tmp_cell_center_attr[2];
+                }
+                else
+                {
+                    double u, v, w;
+                    vec3 p1 = acc_cellCoord_buf[tmp_cell_id[0]];
+                    vec3 p2 = acc_cellCoord_buf[tmp_cell_id[1]];
+                    vec3 p3 = acc_cellCoord_buf[tmp_cell_id[2]];
+                    Interpolator::TRIANGLE tri(p1, p2, p3);
+                    Interpolator::calcTriangleBarycentric(current_vertex, &tri, u, v, w);
+                    current_cell_vertices_value[k] = u * tmp_cell_center_attr[0] + v * tmp_cell_center_attr[1] + w * tmp_cell_center_attr[2];
+                    if (current_cell_vertices_value[k] < 0) current_cell_vertices_value[k] = 0.0;
+                }
+
+                acc_cellVertexAttr_buf[vertex_idx * TOTAY_ZTOP_LAYER + current_layer] = current_cell_vertices_value[k];
+            }
+        });
+    });
+    q.wait_and_throw();
+    // Debug("finished the sycl part");
+    // auto host_accessor = cellVertexZTop_buf.get_access<sycl::access::mode::read>();
+    auto host_accessor = cellVertexAttr_buf.get_host_access(sycl::read_only);
+    auto range = host_accessor.get_range();
+    size_t acc_length = range.size(); // 获取缓冲区的总大小
+
+    // std::cout << "acc_cellVertexZTop_buf.size() = " << cellVertexZTop_vec.size() << " " << acc_length << std::endl;
+    // std::cout << "mVerticesSize x nVertLevels = " << grid->mVertexSize * mVertLevels << std::endl;
+    writeVertexZTopToFile<double>(attr_CtoV_vec, cell_vertex_attribute_path);
+    Debug("[MPASOSolution]::Calc Cell Vertex Attribute  = \t [ %d ] \t type = [ float64 ]", 
+            attr_CtoV_vec.size());
+#endif
+    mDoubleAttributes_CtoV[name] = attr_CtoV_vec;
+}
+
+
 
 //TODO: Temporarily unavailable, it will be released later.
 [[deprecated]] 
@@ -967,25 +1166,37 @@ void MPASOSolution::copyFromNdarray_Double(ftk::ndarray_group* g, std::string va
         auto tmp_get = g->get(value);
         // std::cout << "tmp_get = " << tmp_get.get() << std::endl;
         //  std::cout << "Actual type of tmp_get: " << typeid(*tmp_get).name() << std::endl;
-        auto tmp_ptr = std::dynamic_pointer_cast<ftk::ndarray<float>>(g->get(value));
-        if (tmp_ptr) // 检查转换是否成功
+        auto tmp_ptr_float = std::dynamic_pointer_cast<ftk::ndarray<float>>(g->get(value));
+        if (tmp_ptr_float) // 检查转换是否成功
         {
 
             // std::cout << "tmp_ptr = " << tmp_ptr.get() << std::endl;
-            auto tmp_vec = tmp_ptr->std_vector();
+            auto tmp_vec = tmp_ptr_float->std_vector();
             // std::cout << "tmp_vec.size() = " << tmp_vec.size() << std::endl;
             vec.resize(tmp_vec.size());
             for (auto i = 0; i < tmp_vec.size(); i++)
                 vec[i] = static_cast<double>(tmp_vec[i]);
-            Debug("[Ndarray]::loading %-30s_vec = \t [ %-8d ] \t type = [ %-10s ]",
+            Debug("[Ndarray]::loading %-10s_vec = \t [ %-8d ] \t type = [ %-10s ]",
                 value.c_str(),
                 vec.size(), 
                 ftk::ndarray_base::dtype2str(tmp_get->type()).c_str());
+            return;
         }
-        else
+        auto tmp_ptr_double = std::dynamic_pointer_cast<ftk::ndarray<double>>(tmp_get);
+        if (tmp_ptr_double)
         {
-            std::cerr << "[Error]: The value found is not of type ftk::ndarray<double>" << std::endl;
+            auto tmp_vec = tmp_ptr_double->std_vector();
+            // std::cout << "tmp_vec.size() = " << tmp_vec.size() << std::endl;
+            vec.resize(tmp_vec.size());
+            for (auto i = 0; i < tmp_vec.size(); i++)
+                vec[i] = tmp_vec[i];
+            Debug("[Ndarray]::loading %-10s_vec = \t [ %-8d ] \t type = [ %-10s ]",
+                value.c_str(),
+                vec.size(), 
+                ftk::ndarray_base::dtype2str(tmp_get->type()).c_str());
+            return;
         }
+        std::cerr << "[Error]: The value found is not of type ftk::ndarray<double>" << std::endl;
     }
     else
     {
@@ -1022,4 +1233,132 @@ void MPASOSolution::copyFromNdarray_Char(ftk::ndarray_group* g, std::string valu
         Debug("[Ndarray]::%s not found [\u2717]", value.c_str());
     }
 
+}
+
+void MPASOSolution::copyFromNdarray_Float(ftk::ndarray_group* g, std::string value, std::vector<float>& vec)
+{
+    if (g->has(value))
+    {
+        std::cout << "====== " << value << " found [\u2713]" << std::endl;
+        auto tmp_get = g->get(value);
+       
+        auto tmp_ptr = std::dynamic_pointer_cast<ftk::ndarray<float>>(g->get(value));
+        if (tmp_ptr) // 检查转换是否成功
+        {
+
+            // std::cout << "tmp_ptr = " << tmp_ptr.get() << std::endl;
+            auto tmp_vec = tmp_ptr->std_vector();
+            // std::cout << "tmp_vec.size() = " << tmp_vec.size() << std::endl;
+            vec.resize(tmp_vec.size());
+            for (auto i = 0; i < tmp_vec.size(); i++)
+                vec[i] = static_cast<float>(tmp_vec[i]);
+            Debug("[Ndarray]::loading %-30s_vec = \t [ %-8d ] \t type = [ %-10s ]",
+                value.c_str(),
+                vec.size(), 
+                ftk::ndarray_base::dtype2str(tmp_get->type()).c_str());
+        }
+        else
+        {
+            std::cerr << "[Error]: The value found is not of type ftk::ndarray<double>" << std::endl;
+        }
+    }
+    else
+    {
+        Debug("[Ndarray]::%s not found [\u2717]", value.c_str());
+    }
+
+}
+
+void MPASOSolution::setTimeStep(int timestep)
+{
+    mCurrentTime = timestep;
+}
+
+void MPASOSolution::setAttribute(GridAttributeType type, int val)
+{
+    switch (type)
+    {
+        case GridAttributeType::kCellSize:
+            mCellsSize = val;
+            break;
+        case GridAttributeType::kEdgeSize:
+            mEdgesSize = val;
+            break;
+        case GridAttributeType::kVertexSize:
+            mVertexSize = val;
+            break;
+        case GridAttributeType::kMaxEdgesSize:
+            mMaxEdgesSize = val;
+            break;
+        case GridAttributeType::kVertLevels:
+            mVertLevels = val;
+            break;
+        case GridAttributeType::kVertLevelsP1:
+            mVertLevelsP1 = val;
+            break;
+        default:
+            std::cerr << "[Error]: Invalid GridAttributeType" << std::endl;
+            break;      
+    }
+}
+void MPASOSolution::setAttributesVec3(AttributeType type, const std::vector<vec3>& vec)
+{
+    switch (type)
+    {
+        case AttributeType::kVelocity:
+            cellCenterVelocity_vec = vec;
+            break;
+        default:
+            std::cerr << "[Error]: Invalid AttributeType" << std::endl;
+            break;
+    }
+}
+void MPASOSolution::setAttributesDouble(AttributeType type, const std::vector<double>& vec)
+{
+    switch (type)
+    {
+        case AttributeType::kZTop:
+            cellZTop_vec = vec;
+            break;
+        case AttributeType::kLayerThickness:
+            cellLayerThickness_vec = vec;
+            break;
+        case AttributeType::kBottomDepth:
+            cellBottomDepth_vec = vec;
+            break;
+        case AttributeType::kZonalVelocity:
+            cellZonalVelocity_vec = vec;
+            break;
+        case AttributeType::kMeridionalVelocity:
+            cellMeridionalVelocity_vec = vec;
+            break;
+        case AttributeType::kNormalVelocity:
+            cellNormalVelocity_vec = vec;
+            break;
+        default:
+            std::cerr << "[Error]: Invalid AttributeType" << std::endl;
+            break;
+    }
+}
+
+bool MPASOSolution::checkAttribute()
+{
+    // 1. check velocity
+    // must have cellCenterVelocity_vec or (cellMeridionalVelocity_vec, cellZonalVelocity_vec), or (cellNormalVelocity_vec)
+    if (cellCenterVelocity_vec.empty() &&
+        !( !cellMeridionalVelocity_vec.empty() && !cellZonalVelocity_vec.empty() ) &&
+        cellNormalVelocity_vec.empty())
+    {
+        std::cerr << "[Error]: Invalid Velocity Attribute" << std::endl;
+        return false;
+    }
+    // 2. check ztop
+    // must have cellZTop_vec or (kLayerThickness, kBottomDepth), or kLayerThickness
+    if (cellZTop_vec.empty() && cellLayerThickness_vec.empty())
+    {
+        std::cerr << "[Error]: Invalid ZTop Attribute" << std::endl;
+        return false;
+    }
+    
+    return true;
 }

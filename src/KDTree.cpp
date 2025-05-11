@@ -2,6 +2,7 @@
 
 #include "GeoConverter.hpp"
 
+using namespace MOPS;
 
 #if __APPLE__
 int split_node;

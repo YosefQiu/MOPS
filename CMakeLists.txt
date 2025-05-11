@@ -7,6 +7,7 @@ set(CMAKE_CXX_COMPILER icpx)
 
 # Define an option for building with VTK support
 option(MOPS_USE_VTK "Use VTK" ON)
+set(PYTHON_EXPORT ON)
 
 # Find VTK if enabled
 if(MOPS_USE_VTK)
@@ -30,13 +31,10 @@ if(MOPS_USE_VTK)
     endif()
 endif()
 
-# Find YAML-CPP
 find_package(yaml-cpp REQUIRED)
-# Find NDARRAY
 find_package (CUDAToolkit)
 find_package(ndarray REQUIRED)
-message(STATUS "ndarray found at: ${ndarray_DIR}")
-# Attempt to find NetCDF
+find_package(TBB REQUIRED)
 find_package(netCDF)
 
 include_directories(
@@ -64,6 +62,7 @@ set(TARGET_LIBRARIES
     yaml-cpp::yaml-cpp
     ndarray::ndarray
     netCDF::netcdf
+    TBB::tbb
 )
 
 if(MOPS_USE_VTK)
@@ -80,6 +79,28 @@ if(MOPS_USE_VTK)
 endif()
 
 target_compile_features(${PROJECT_NAME} PRIVATE ${PRJ_COMPILE_FEATURES})
+
+add_library(mops_core STATIC
+    src/MPASOGrid.cpp
+    src/MPASOSolution.cpp
+    src/MPASOReader.cpp
+    src/SYCLKernel.cpp
+    src/MOPSApp.cpp
+    src/MOPS.cpp
+    src/MPASOVisualizer.cpp
+    src/MPASOField.cpp
+)
+
+set_target_properties(mops_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(mops_core PUBLIC include)
+target_link_libraries(mops_core PUBLIC yaml-cpp::yaml-cpp TBB::tbb ${NetCDF_LIBRARIES} ${VTK_LIBRARIES})
+vtk_module_autoinit(
+    TARGETS mops_core
+    MODULES ${VTK_LIBRARIES}
+)
+if(PYTHON_EXPORT)
+    add_subdirectory(tools/pyMOPS)
+endif()
 
 install(TARGETS ${PROJECT_NAME}
     EXPORT ${PROJECT_NAME}Targets

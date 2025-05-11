@@ -1,5 +1,6 @@
 ﻿#include "MPASOField.h"
 
+using namespace MOPS;
 void MPASOField::initField(MPASOGrid* grid, MPASOSolution* sol_1, MPASOSolution* sol_2)
 {
 	mGrid = std::shared_ptr<MPASOGrid>(grid);

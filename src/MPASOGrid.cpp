@@ -1,9 +1,133 @@
 ﻿#include "MPASOGrid.h"
+#include "Utils.hpp"
+
+using namespace MOPS;
 
 MPASOGrid::MPASOGrid()
 {
     mKDTree = nullptr;
 }
+
+void MPASOGrid::initGrid_DemoLoading(const char* yaml_path)
+{
+    std::shared_ptr<ftk::stream> stream(new ftk::stream);
+	stream->parse_yaml(yaml_path);
+	auto grid_path = stream->substreams[0]->filenames[0];
+	auto gs = stream->read_static();
+    std::string fileName = removeFileExtension(stream->substreams[0]->filenames[0]);
+	std::string dataDir = createDataPath(".data", fileName);
+	this->initGrid(gs.get(), MOPS::MPASOReader::readGridInfo(grid_path).get());
+    this->mDataDir = dataDir;
+    this->mMeshName = fileName;
+
+}
+
+void MPASOGrid::setGridAttribute(GridAttributeType type, int val)
+{
+    // kCellSize, kEdgeSize, kVertexSize, kMaxEdgesSize, kVertLevels, kVertLevelsP1,
+    switch (type)
+    {
+        case GridAttributeType::kCellSize:
+            this->mCellsSize = val;
+            break;
+        case GridAttributeType::kEdgeSize:
+            this->mEdgesSize = val;
+            break;
+        case GridAttributeType::kVertexSize:
+            this->mVertexSize = val;
+            break;
+        case GridAttributeType::kMaxEdgesSize:
+            this->mMaxEdgesSize = val;
+            break;
+        case GridAttributeType::kVertLevels:
+            this->mVertLevels = val;
+            break;
+        case GridAttributeType::kVertLevelsP1:
+            this->mVertLevelsP1 = val;
+            break;
+        default:
+            std::cout << "Error: Invalid GridAttributeType" << std::endl;
+            break;
+    }
+}
+
+void MPASOGrid::setGridAttributesVec3(GridAttributeType type, const std::vector<vec3>& vec)
+{
+   
+    // kVertexCoord, kCellCoord, kEdgeCoord,
+    switch (type)
+    {
+        case GridAttributeType::kVertexCoord:
+            this->vertexCoord_vec = vec;
+            break;
+        case GridAttributeType::kCellCoord:
+            this->cellCoord_vec = vec;
+            break;
+        case GridAttributeType::kEdgeCoord:
+            this->edgeCoord_vec = vec;
+            break;
+        default:
+            std::cout << "Error: Invalid GridAttributeType" << std::endl;
+    }
+}
+
+void MPASOGrid::setGridAttributesVec2(GridAttributeType type, const std::vector<vec2>& vec)
+{
+    // kVertexLatLon
+    switch (type)
+    {
+        case GridAttributeType::kVertexLatLon:
+            this->vertexLatLon_vec = vec;
+            break;
+        default:
+            std::cout << "Error: Invalid GridAttributeType" << std::endl;
+    }
+}
+
+void MPASOGrid::setGridAttributesInt(GridAttributeType type, const std::vector<size_t>& vec)
+{
+    // kVerticesOnCell, kVerticesOnEdge, kCellsOnVertex, kCellsOnCell, kNumberVertexOnCell, kCellsOnEdge, kEdgesOnCell
+    switch (type)
+    {
+        case GridAttributeType::kVerticesOnCell:
+            this->verticesOnCell_vec = vec;
+            break;
+        case GridAttributeType::kVerticesOnEdge:
+            this->verticesOnEdge_vec = vec;
+            break;
+        case GridAttributeType::kCellsOnVertex:
+            this->cellsOnVertex_vec = vec;
+            break;
+        case GridAttributeType::kCellsOnCell:
+            this->cellsOnCell_vec = vec;
+            break;
+        case GridAttributeType::kNumberVertexOnCell:
+            this->numberVertexOnCell_vec = vec;
+            break;
+        case GridAttributeType::kCellsOnEdge:
+            this->cellsOnEdge_vec = vec;
+            break;
+        case GridAttributeType::kEdgesOnCell:
+            this->edgesOnCell_vec = vec;
+            break;
+        default:
+            std::cout << "Error: Invalid GridAttributeType" << std::endl;
+    }
+}
+
+void MPASOGrid::setGridAttributesFloat(GridAttributeType type, const std::vector<float>& vec)
+{
+    // kCellWeight
+    switch (type)
+    {
+        case GridAttributeType::kCellWeight:
+            this->cellWeight_vec = vec;
+            break;
+        default:
+            std::cout << "Error: Invalid GridAttributeType" << std::endl;
+    }
+}
+
 
 [[deprecated]]
 void MPASOGrid::initGrid(MPASOReader* reader)
@@ -242,4 +366,89 @@ void MPASOGrid::copyFromNdarray_Vec3(ftk::ndarray_group* g, std::string xValue, 
     {
         std::cout << "Error: Missing data in ndarray_group for " << name << std::endl;
     }
+}
+
+bool MPASOGrid::checkAttribute()
+{
+    if (this->mCellsSize == 0)
+    {
+        std::cout << "Error: mCellsSize is not set" << std::endl;
+        return false;
+    }
+    if (this->mEdgesSize == 0)
+    {
+        std::cout << "Error: mEdgesSize is not set" << std::endl;
+        return false;
+    }
+    if (this->mVertexSize == 0)
+    {
+        std::cout << "Error: mVertexSize is not set" << std::endl;
+        return false;
+    }
+    if (this->mMaxEdgesSize == 0)
+    {
+        std::cout << "Error: mMaxEdgesSize is not set" << std::endl;
+        return false;
+    }
+    if (this->mVertLevels == 0)
+    {
+        std::cout << "Error: mVertLevels is not set" << std::endl;
+        return false;
+    }
+    if (this->mVertLevelsP1 == 0)
+    {
+        std::cout << "Error: mVertLevelsP1 is not set" << std::endl;
+        return false;
+    }
+    if (this->cellCoord_vec.size() < 1)
+    {
+        std::cout << "Error: cellCoord_vec is not set" << std::endl;
+        return false;
+    }
+    if (this->vertexCoord_vec.size() < 1)
+    {
+        std::cout << "Error: vertexCoord_vec is not set" << std::endl;
+        return false;
+    }
+    if (this->edgeCoord_vec.size() < 1)
+    {
+        std::cout << "Error: edgeCoord_vec is not set" << std::endl;
+        return false;
+    }
+    if (this->verticesOnCell_vec.size() < 1)
+    {
+        std::cout << "Error: verticesOnCell_vec is not set" << std::endl;
+        return false;
+    }
+    if (this->verticesOnEdge_vec.size() < 1)
+    {
+        std::cout << "Error: verticesOnEdge_vec is not set" << std::endl;
+        return false;
+    }
+    if (this->cellsOnVertex_vec.size() < 1)
+    {
+        std::cout << "Error: cellsOnVertex_vec is not set" << std::endl;
+        return false;
+    }
+    if (this->cellsOnCell_vec.size() < 1)
+    {
+        std::cout << "Error: cellsOnCell_vec is not set" << std::endl;
+        return false;
+    }
+    if (this->numberVertexOnCell_vec.size() < 1)
+    {
+        std::cout << "Error: numberVertexOnCell_vec is not set" << std::endl;
+        return false;
+    }
+    if (this->cellsOnEdge_vec.size() < 1)
+    {
+        std::cout << "Error: cellsOnEdge_vec is not set" << std::endl;
+        return false;
+    }
+    if (this->edgesOnCell_vec.size() < 1)
+    {
+        std::cout << "Error: edgesOnCell_vec is not set" << std::endl;
+        return false;
+    }
+    return true;
 }

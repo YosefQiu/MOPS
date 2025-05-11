@@ -1,5 +1,5 @@
 #include "MPASOReader.h"
-
+using namespace MOPS;
 #define NC_CHECK(err) \
     if ((err) != NC_NOERR) { \
         std::cerr << "NetCDF error: " << nc_strerror(err) << std::endl; \
@@ -88,11 +88,11 @@ void MPASOReader::readSol(const int& timestep)
     NC_CHECK(err);
     mVertLevels = static_cast<int>(tmp);
 
-    err = nc_inq_dimid(ncid, "nVertLevelsP1", &dimid);
-    NC_CHECK(err);
-    err = nc_inq_dimlen(ncid, dimid, &tmp);
-    NC_CHECK(err);
-    mVertLevelsP1 = static_cast<int>(tmp);
+    // err = nc_inq_dimid(ncid, "nVertLevelsP1", &dimid);
+    // NC_CHECK(err);
+    // err = nc_inq_dimlen(ncid, dimid, &tmp);
+    // NC_CHECK(err);
+    // mVertLevelsP1 = static_cast<int>(tmp);
 
     currentTimestep = timestep;
 }

@@ -13,3 +13,4 @@ CMakeUserPresets.json
 build*
 third_part/*.*
 third_part
+tools/pyMOPS/build
