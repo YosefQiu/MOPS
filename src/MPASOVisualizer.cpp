@@ -125,7 +125,7 @@ void MPASOVisualizer::VisualizeFixedLayer(MPASOField* mpasoF, VisualizationSetti
                 int cell_id = acc_cellID_buf[global_id];
 
 
-                // Determine whether it is on the mainland 判断是否在大陆上
+                // Determine whether it is on land
                 // 1.1 Calculate how many vertices are in this cell.
                 auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
                 auto nan = std::numeric_limits<size_t>::max();
@@ -143,7 +143,7 @@ void MPASOVisualizer::VisualizeFixedLayer(MPASOField* mpasoF, VisualizationSetti
 
                 if (true)//config->PositionType == CalcPositionType::kPoint //TODO
                 {
-                    //  Calculate the (velocity , coordinates and zTOP) of each Cell vertex.
+                    // Calculate the (velocity, coordinates and zTOP) of each Cell vertex.
                     vec3 current_cell_vertices_velocity[MAX_VERTEX_NUM];
                     vec3 current_verteices_positions[MAX_VERTEX_NUM];
                     double current_cell_vertices_ztop[MAX_VERTEX_NUM];
@@ -159,14 +159,14 @@ void MPASOVisualizer::VisualizeFixedLayer(MPASOField* mpasoF, VisualizationSetti
                         current_cell_vertices_ztop[v_idx] = ztop;
                         current_verteices_positions[v_idx] = pos;
                     }
-                    //  Set the non-existent vertex to NaN.
+                    // Set the non-existent vertex to NaN.
                     for (auto v_idx = current_cell_vertices_number; v_idx < MAX_VERTEX_NUM; ++v_idx)
                     {
                         current_cell_vertices_velocity[v_idx] = vec3_nan;
                         current_verteices_positions[v_idx] = vec3_nan;
                         current_cell_vertices_ztop[v_idx] = double_nan;
                     }
-                    //  Calculate the speed of the current point using the Wachspress coordinates parameter.
+                    // Calculate the speed of the current point using the Wachspress coordinates parameter.
                     double current_cell_weight[MAX_VERTEX_NUM];
                     Interpolator::CalcPolygonWachspress(current_position, current_verteices_positions, current_cell_weight, current_cell_vertices_number);
                     for (auto v_idx = current_cell_vertices_number; v_idx < MAX_VERTEX_NUM; ++v_idx)
@@ -355,7 +355,7 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
             GeoConverter::convertRadianLatLonToXYZ(current_latlon_r, current_position);
             int cell_id = acc_cellID_buf[global_id];
 
-            // Determine whether it is on the mainland 判断是否在大陆上
+            // Determine whether it is on land
             // 1.1 Calculate how many vertices are in this cell.
             auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
             // 1.2 Find all candidate vertices
