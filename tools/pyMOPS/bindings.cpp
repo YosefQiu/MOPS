@@ -189,7 +189,7 @@ PYBIND11_MODULE(pyMOPS, m) {
 
    
    
-    py::class_<MOPS::SamplingSettings>(m, "SamplingSettings")
+    py::class_<MOPS::SamplingSettings>(m, "SeedsSettings")
         .def(py::init<>())
         .def("setSeedsRange", [](MOPS::SamplingSettings& self, py::tuple t) {
             if (t.size() != 2) throw std::runtime_error("sampleRange must be a tuple of size 2");
