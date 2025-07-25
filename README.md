@@ -15,7 +15,7 @@
 cd $PSCRATCH
 git clone https://github.com/YosefQiu/MOPS.git
 cd MOPS
-./script/build.sh
+./script/compile.sh.sh
 ```
 ### **2️⃣ Use [Spack](https://github.com/spack/spack)** (will be update use a new repo)
 > ### 🔗  check [spack_test](https://github.com/YosefQiu/spack_test) for more details.
