@@ -1,7 +1,5 @@
 #pragma once
-#include "ggl.h"
-#include "MOPSApp.h"
-#include <vector>
+#include "Core/MOPSApp.h"
 
 
 namespace MOPS

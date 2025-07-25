@@ -1,0 +1,107 @@
+std::vector<TrajectoryLine> MPASOVisualizer::VisualizeTrajectoryPathline(
+    MPASOField* mpasoF,
+    const std::vector<CartesianCoord>& points,
+    TrajectorySettings* config,
+    const std::vector<int>& default_cell_id,
+    sycl::queue& sycl_Q)
+{
+    const size_t N = points.size();
+    const int steps = config->simulationDuration / config->deltaT;
+    const int recordT = config->recordT;
+    const double dt = config->deltaT;
+    const double depth = config->depth;
+
+    // Initial positions
+    std::vector<vec3> samplePos(points.begin(), points.end());
+    std::vector<vec3> writePos(N * (steps / recordT));
+
+    // Prepare trajectory lines
+    std::vector<TrajectoryLine> trajectories(N);
+    for (size_t i = 0; i < N; ++i) {
+        trajectories[i].lineID = i;
+        trajectories[i].points = { samplePos[i] };
+        trajectories[i].depth = depth;
+        trajectories[i].duration = config->simulationDuration;
+        trajectories[i].timestamp = dt;
+    }
+
+    // Static grid buffers (unchanged between frames)
+    sycl::buffer<size_t,1> grid_info_buf(/*...*/);
+    sycl::buffer<vec3,1> vertexCoord_buf(/*...*/);
+    sycl::buffer<vec3,1> cellCoord_buf(/*...*/);
+    sycl::buffer<size_t,1> numVtx_buf(/*...*/);
+    sycl::buffer<size_t,1> vtxOnCell_buf(/*...*/);
+    sycl::buffer<size_t,1> cellOnCell_buf(/*...*/);
+    sycl::buffer<int,1> cellID_buf(default_cell_id.data(), sycl::range<1>(N));
+
+    // Ping-pong buffers for positions
+    sycl::buffer<vec3,1> posBufA(samplePos.data(), sycl::range<1>(N));
+    sycl::buffer<vec3,1> posBufB(samplePos.data(), sycl::range<1>(N));
+
+    // Pathline: iterate adjacent time frames
+    for (int t = 0; t < steps - 1; ++t) {
+        // Load two frames
+        sycl::buffer<vec3,1> velF_buf(mpasoF->GetCellVertexVelocity(t).data(), sycl::range<1>(mpasoF->mSol_Front->cellVertexVelocity_vec.size()));
+        sycl::buffer<vec3,1> velB_buf(mpasoF->GetCellVertexVelocity(t+1).data(), sycl::range<1>(mpasoF->mSol_Back ->cellVertexVelocity_vec.size()));
+        sycl::buffer<double,1> zF_buf(mpasoF->mSol_Front->cellVertexZTop_vec.data(), sycl::range<1>(mpasoF->mSol_Front->cellVertexZTop_vec.size()));
+        sycl::buffer<double,1> zB_buf(mpasoF->mSol_Back ->cellVertexZTop_vec.data(), sycl::range<1>(mpasoF->mSol_Back ->cellVertexZTop_vec.size()));
+
+        sycl_Q.submit([&](sycl::handler& cgh) {
+            // Grid accessors
+            auto acc_info    = grid_info_buf.get_access<sycl::access::mode::read>(cgh);
+            auto acc_vCoord  = vertexCoord_buf.get_access<sycl::access::mode::read>(cgh);
+            auto acc_cCoord  = cellCoord_buf.get_access<sycl::access::mode::read>(cgh);
+            auto acc_numV    = numVtx_buf.get_access<sycl::access::mode::read>(cgh);
+            auto acc_vOnCell = vtxOnCell_buf.get_access<sycl::access::mode::read>(cgh);
+            auto acc_cOnCell = cellOnCell_buf.get_access<sycl::access::mode::read>(cgh);
+            auto acc_cID     = cellID_buf.get_access<sycl::access::mode::read>(cgh);
+
+            // Velocity accessors for front/back
+            auto acc_velF = velF_buf.get_access<sycl::access::mode::read>(cgh);
+            auto acc_velB = velB_buf.get_access<sycl::access::mode::read>(cgh);
+            auto acc_zF   = zF_buf.get_access<sycl::access::mode::read>(cgh);
+            auto acc_zB   = zB_buf.get_access<sycl::access::mode::read>(cgh);
+
+            // Ping-pong pos buffers
+            auto acc_inPos  = posBufA.get_access<sycl::access::mode::read_write>(cgh);
+            auto acc_outPos = posBufB.get_access<sycl::access::mode::write>(cgh);
+
+            // Recorder index buffer
+            sycl::stream out(1024,256,cgh);
+
+            cgh.parallel_for<class PathlineKernel>(sycl::range<1>(N), [=](sycl::item<1> it){
+                int gid = it[0];
+                vec3 pos = acc_inPos[gid];
+                int cid = acc_cID[gid];
+                int numSteps = config->deltaT > 0 ? (int)((1.0*(config->deltaT))/config->deltaT) : 1;
+
+                int saveCount = 0;
+                for (int step = 0; step < numSteps; ++step) {
+                    double alpha = double(step) / double(numSteps);
+                    // compute front/back velocities at pos
+                    vec3 vF = SYCLKernel::CalcVelocityLayered(pos, cid, acc_vCoord, acc_numV, acc_vOnCell, acc_zF, acc_velF, acc_info[4], depth);
+                    vec3 vB = SYCLKernel::CalcVelocityLayered(pos, cid, acc_vCoord, acc_numV, acc_vOnCell, acc_zB, acc_velB, acc_info[4], depth);
+                    // time interpolate
+                    vec3 v;
+                    v.x() = (1-alpha)*vF.x() + alpha*vB.x();
+                    v.y() = (1-alpha)*vF.y() + alpha*vB.y();
+                    v.z() = (1-alpha)*vF.z() + alpha*vB.z();
+                    // Euler step
+                    pos.x() += v.x()*dt;
+                    pos.y() += v.y()*dt;
+                    pos.z() += v.z()*dt;
+                    // record every recordT
+                    if ((step+1) % recordT == 0) {
+                        trajectories[gid].points.push_back(pos);
+                    }
+                }
+                acc_outPos[gid] = pos;
+            });
+        });
+        sycl_Q.wait();
+        posBufA.swap(posBufB);
+    }
+
+    // Final positions already recorded
+    return trajectories;
+}

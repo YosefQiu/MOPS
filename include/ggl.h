@@ -27,7 +27,7 @@
 #include <numbers>
 #include <cmath>
 #include <filesystem>
-
+#include <cstddef>
 
 
 
@@ -37,12 +37,15 @@
 #include <string.h>
 #include <atomic>
 
-#define LOADING_VTK             1
 #define LOADING_CYCODE_BASE     0
 #define LOADING_NETCDF_CXX      1
 #define LOADING_SYCL            1
 
-#if LOADING_VTK == 1
+#ifndef MOPS_VTK
+#define MOPS_VTK 0
+#endif
+
+#if MOPS_VTK
     //VTK Readers/Writers
     #include <vtkUnstructuredGridReader.h>
     #include <vtkXMLUnstructuredGridReader.h>
@@ -56,6 +59,7 @@
     #include <vtkUnstructuredGrid.h>
     #include <vtkImageData.h>
     #include <vtkPoints.h>
+    #include <vtkPointData.h>
     #include <vtkPolyLine.h>
     #include <vtkCellArray.h>
     #include <vtkTetra.h>

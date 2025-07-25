@@ -3,12 +3,12 @@
 #include <pybind11/numpy.h>
 #include <memory>
 
-#include "MPASOGrid.h"
-#include "MPASOSolution.h"
-#include "MOPSApp.h"
-#include "ImageBuffer.hpp"
 #include "api/MOPS.h"
-#include "GeoConverter.hpp" 
+#include "Core/MPASOGrid.h"
+#include "Core/MPASOSolution.h"
+#include "Core/MOPSApp.h"
+#include "SYCL/ImageBuffer.hpp"
+#include "Utils/GeoConverter.hpp" 
 
 
 namespace py = pybind11;

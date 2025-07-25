@@ -14,3 +14,10 @@ build*
 third_part/*.*
 third_part
 tools/pyMOPS/build
+ndarray
+pybind11
+vtk
+yaml-cpp
+third_lib
+netcdf-c
+build*
