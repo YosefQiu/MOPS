@@ -1,4 +1,5 @@
 #include "Core/MOPSApp.h"
+#include <vector>
 
 
 
@@ -130,7 +131,51 @@ namespace MOPS
     	std::vector<int> cell_id_vec;
 
 		mpasoField->calcInWhichCells(sample_points, cell_id_vec);
-		
+		// // test
+		// std::vector<CartesianCoord> tmp_pts;
+		// std::vector<int> test_id;
+		// tmp_pts.push_back(sample_points[0]);
+		// tmp_pts.push_back(CartesianCoord{4251170.0822, -3203303.8254, 3500880.7398});
+		// mpasoField->calcInWhichCells(tmp_pts, test_id);
+		// for (auto i = 0; i < test_id.size(); i++)
+		// {
+		// 	std::cout << "[Test Sample Point " << i << "] : (" 
+		// 		<< tmp_pts[i].x() << ", "
+		// 		<< tmp_pts[i].y() << ", "
+		// 		<< tmp_pts[i].z() << ") in cell_id = " << test_id[i] << std::endl;
+		// }
+		// exit(-1);
+
+
+		// int c0 = 82578;    // 上一步 cell
+		// int c1 = 844;      // 你在 host 判到的新 cell
+		// auto P1 = CartesianCoord{4251170.0822, -3203303.8254, 3500880.7398};
+
+		// auto C0 = mpasoField->mGrid->cellCoord_vec[c0];
+		// auto C1 = mpasoField->mGrid->cellCoord_vec[c1];
+
+		// auto d0 = YOSEF_LENGTH(C0 - P1);
+		// auto d1 = YOSEF_LENGTH(C1 - P1);
+		// std::cout << "[CHK] dist to center: c0=" << c0 << " d0=" << d0
+		// 		<< " | c1=" << c1 << " d1=" << d1 << std::endl;
+
+
+		// int cell = 82578;
+		// int maxEdges = 7;
+		// int nCells   = 235160;
+
+		// // A) 按 cell 连续（[nCells][maxEdges]）
+		// std::cout << "[cell-contig] ";
+		// for (int k=0;k<maxEdges;++k){
+		// 	int nid = mpasoField->mGrid->cellsOnCell_vec[cell*maxEdges + k];
+		// 	nid--;
+		// 	std::cout << nid << " ";
+		// }
+		// std::cout << std::endl;
+
+
+		// // exit(-1);
+
 		auto lines = MPASOVisualizer::StreamLine(mpasoField.get(), sample_points, config, cell_id_vec, mSYCLQueue);
 		std:: cout << " ==== [\u2713] done..." << std::endl;
 		return lines;

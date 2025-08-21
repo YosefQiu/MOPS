@@ -11,7 +11,7 @@ namespace MOPS
                                         double minLat, double maxLat,
                                         double minLon, double maxLon);
         SYCL_EXTERNAL 
-        static bool IsInOcean(int cell_id, int max_edge, vec3 current_position, 
+        static bool IsInMesh(int cell_id, int max_edge, vec3 current_position, 
             sycl::accessor<size_t, 1, sycl::access::mode::read> acc_numberVertexOnCell_buf,
             sycl::accessor<size_t, 1, sycl::access::mode::read> acc_verticesOnCell_buf, 
             sycl::accessor<vec3, 1, sycl::access::mode::read> acc_vertexCoord_buf);

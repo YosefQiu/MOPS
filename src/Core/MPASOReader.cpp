@@ -88,6 +88,10 @@ void MPASOReader::readSol(const int& timestep)
     NC_CHECK(err);
     mVertLevels = static_cast<int>(tmp);
 
+    Debug("%-40s = \t [ %d ]", "[MPASOReader]::loading mTimesteps", mTimesteps);
+    Debug("%-40s = \t [ %d ]", "[MPASOReader]::loading mVertLevels", mVertLevels);
+
+
     // err = nc_inq_dimid(ncid, "nVertLevelsP1", &dimid);
     // NC_CHECK(err);
     // err = nc_inq_dimlen(ncid, dimid, &tmp);

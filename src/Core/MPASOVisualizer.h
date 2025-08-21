@@ -110,6 +110,7 @@ namespace MOPS
     
         static std::vector<CartesianCoord>  TEST_VisualizeTrajectory(std::vector<CartesianCoord>& points, TrajectorySettings* config, sycl::queue& sycl_Q);
 
+        static std::vector<TrajectoryLine> removeNaNTrajectoriesAndReindex(std::vector<TrajectoryLine>& trajectory_lines);
     };
 
 

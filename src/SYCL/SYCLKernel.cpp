@@ -38,59 +38,41 @@ void SYCLKernel::GetCellVerticesIdx(int cell_id, int current_cell_vertices_numbe
     }
 }
 SYCL_EXTERNAL
-bool SYCLKernel::IsInOcean(int cell_id, int max_edge, vec3 current_position, 
+bool SYCLKernel::IsInMesh(int cell_id, int max_edge, vec3 current_position, 
         sycl::accessor<size_t, 1, sycl::access::mode::read> acc_numberVertexOnCell_buf,
         sycl::accessor<size_t, 1, sycl::access::mode::read> acc_verticesOnCell_buf, 
         sycl::accessor<vec3, 1, sycl::access::mode::read> acc_vertexCoord_buf)
 {
-    const int VLA_SIZE = 20;
-    // 判断是否在大陆上
-    bool is_land = false;
-    bool all_consistent = true;
-    // 1.1 计算这个CELL 有多少个顶点
-    auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
-    // 1.2 找出所有候选顶点
-    size_t current_cell_vertices_idx[VLA_SIZE];
-    for (size_t k = 0; k < max_edge; ++k)
+
+    if (!sycl::isfinite(current_position.x()) ||
+        !sycl::isfinite(current_position.y()) ||
+        !sycl::isfinite(current_position.z())) 
     {
-        current_cell_vertices_idx[k] = acc_verticesOnCell_buf[cell_id * max_edge + k] - 1; // Assuming max_edge is the max number of vertices per cell
+        return false;
     }
-    // 1.3 不存在的顶点设置为nan
+
+    
     auto nan = std::numeric_limits<size_t>::max();
-    for (size_t k = current_cell_vertices_number; k < max_edge; ++k)
-    {
-        current_cell_vertices_idx[k] = nan;
-    }
-    // =============================== 找到max_edge个顶点
-    double normalsConsistency[VLA_SIZE];
+    auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
+    if (current_cell_vertices_number == 0) return false;
+    auto idx_at = [&](size_t k)->size_t {
+        return acc_verticesOnCell_buf[cell_id * max_edge + k] - 1;
+    };
+
     for (auto k = 0; k < current_cell_vertices_number; k++)
     {
-        auto A_idx = current_cell_vertices_idx[k];
-        auto B_idx = current_cell_vertices_idx[(k + 1) % current_cell_vertices_number];
+        auto A_idx = idx_at(k);
+        auto B_idx = idx_at((k + 1) % current_cell_vertices_number);
+
         auto A = acc_vertexCoord_buf[A_idx];
         auto B = acc_vertexCoord_buf[B_idx];
-        vec3 O(0.0, 0.0, 0.0);
-        auto AO = O - A;
-        auto BO = O - B;
-        auto A_point = current_position - A;
-        vec3 surface_normal = YOSEF_CROSS(AO, BO);
-        double direction = YOSEF_DOT(surface_normal, A_point);
-        normalsConsistency[k] = direction;
+        
+        vec3 surface_normal = YOSEF_CROSS(A, B);
+        double direction = YOSEF_DOT(surface_normal, current_position);
+        
+        if (direction < 0) return false;
     }
-    int sign = (normalsConsistency[0] > 0) ? 1 : -1;
-
-    for (auto k = 1; k < current_cell_vertices_number; k++)
-    {
-        int currentSign = (normalsConsistency[k] > 0) ? 1 : -1;
-        if (currentSign != sign)
-        {
-            // 这个点在大陆上
-            all_consistent = false;
-            break;
-        }
-    }
-
-    return all_consistent; // true in ocean, false on land
+    return true;
 }
 
 SYCL_EXTERNAL
@@ -99,12 +81,16 @@ SYCL_EXTERNAL
 {
     if (current_cell_vertices_number > VLA) return;
     current_cell_neighbors_idx[0] = cell_id;
-    for (auto k = 1; k < current_cell_vertices_number; k++)
-    {
-        int negi_cell_id = acc_cells_onCell_buf[max_edge * cell_id + k];
-        current_cell_neighbors_idx[k] = negi_cell_id - 1;
+    int copyN = current_cell_vertices_number;
+    if (copyN > VLA-1) copyN = VLA-1;
+    for (int k=0; k<copyN; ++k) {
+        int nid1 = (int)acc_cells_onCell_buf[cell_id * max_edge + k];  
+        current_cell_neighbors_idx[k] = nid1 - 1;
     }
-    for (auto k = current_cell_vertices_number; k < VLA; k++)
+
+    // 把 self 放到最后一个有效位置
+    current_cell_neighbors_idx[copyN] = cell_id;
+    for (auto k = copyN + 1; k < VLA; k++)
     {
         current_cell_neighbors_idx[k] = -1;
     }

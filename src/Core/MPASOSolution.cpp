@@ -265,26 +265,50 @@ void MPASOSolution::calcCellCenterZtop()
 
     // std::cout << "=======\n";
     // std::cout << "nCellsSize = " << nCellsSize << std::endl;
-    // //std::cout << "nVertLevelsP1 = " << nVertLevelsP1 << std::endl;
+    //std::cout << "nVertLevelsP1 = " << nVertLevelsP1 << std::endl;
     // std::cout << "nVertLevels = " << nVertLevels << std::endl;
     // std::cout << "nTimesteps = " << nTimesteps << std::endl;
+
+    bool hasBottomDepth = !cellBottomDepth_vec.empty();
+
 
     if (!cellZTop_vec.empty()) cellZTop_vec.clear();
     cellZTop_vec.resize(nCellsSize * nVertLevels);
 
     for (size_t i = 0; i < nCellsSize; ++i)
     {
-        // 初始化最顶层
-        cellZTop_vec[i * nVertLevels] = 0.0;
-        for (size_t j = 1; j < nVertLevels; ++j)
+        if (hasBottomDepth)
         {
-            double layerThickness;
-            getCellLayerThickness(i, j - 1, cellLayerThickness_vec, layerThickness);
-            cellZTop_vec[i * nVertLevels + j] = cellZTop_vec[i * nVertLevels + j - 1] - layerThickness;
+           // 使用物理正确的 zTop 计算方式（从 bottomDepth 反向累加）
+            // double acc = 0.0;
+            // for (int k = nVertLevels - 1; k >= 0; --k)
+            // {
+            //     double layerThickness;
+            //     getCellLayerThickness(i, k, cellLayerThickness_vec, layerThickness);
+            //     acc += layerThickness;
+            //     cellZTop_vec[i * nVertLevels + k] = cellBottomDepth_vec[i] - acc;
+            // }
+            double z = -cellBottomDepth_vec[i];
+            for (int k = nVertLevels - 1; k >= 0; --k) {
+                double layerThickness;
+                getCellLayerThickness(i, k, cellLayerThickness_vec, layerThickness);
+                z += layerThickness;
+                cellZTop_vec[i * nVertLevels + k] = z;
+            }
         }
+        else
+        {
+           // 初始化最顶层
+            cellZTop_vec[i * nVertLevels] = 0.0;
+            for (size_t j = 1; j < nVertLevels; ++j)
+            {
+                double layerThickness;
+                getCellLayerThickness(i, j - 1, cellLayerThickness_vec, layerThickness);
+                cellZTop_vec[i * nVertLevels + j] = cellZTop_vec[i * nVertLevels + j - 1] - layerThickness;
+            }
+        }
+        
     }
-
-
 
     for (auto i = 0; i < cellZTop_vec.size(); ++i)
     {
@@ -293,6 +317,8 @@ void MPASOSolution::calcCellCenterZtop()
 
     mTotalZTopLayer = nVertLevels;
 
+    // std::cout << "cell ZTOP_vec " << cellZTop_vec[0] << std::endl;
+    // exit(-1);
     // std::cout << "cellZTop_vec.size() = " << cellZTop_vec.size() << std::endl;
     // std::cout << "nCellSize x nVertLevels = " << nCellsSize * nVertLevels << std::endl;
 }
@@ -497,6 +523,7 @@ void MPASOSolution::calcCellVertexZtop(MPASOGrid* grid, std::string& dataDir, sy
                 tmp_cell_id[2] = acc_cellsOnVertex_buf[3 * vertex_idx + 2] - 1;
                 // 2.3 找到这3个CELL 的中心ZTOP
                 double tmp_cell_center_ztop[3];
+                int valid_count = 0;
                 for (auto tmp_cell = 0; tmp_cell < NEIGHBOR_NUM; tmp_cell++)
                 {
                     double value;
@@ -512,6 +539,7 @@ void MPASOSolution::calcCellVertexZtop(MPASOGrid* grid, std::string& dataDir, sy
                         auto ztop_idx = VERTLEVELS * tmp_cell_id[tmp_cell] + current_layer;
                         ztop = acc_cellCenterZTop_buf[ztop_idx];
                         tmp_cell_center_ztop[tmp_cell] = ztop;
+                        valid_count++;
                     }
                 }
                 // 2.4 如果是边界点

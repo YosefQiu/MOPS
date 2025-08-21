@@ -86,10 +86,6 @@ namespace MOPS
 		val.z() = img_acc[index + 2];
 	}
 
-	inline bool my_isnan(float x) 
-	{
-		return x != x; 
-	}
 
 	template <typename T>
 	inline bool SaveToPNG(const MOPS::ImageBuffer<T>& buffer, const std::string& filename, int channel = 3) 
@@ -106,7 +102,7 @@ namespace MOPS
 
 		for (const auto& v : channelData) {
 			float fv = static_cast<float>(v);
-			if (!std::isnan(fv)) {
+			if (!sycl::isnan(fv)) {
 				minVal = std::min(minVal, fv);
 				maxVal = std::max(maxVal, fv);
 			}
@@ -118,7 +114,7 @@ namespace MOPS
 		for (int i = 0; i < w * h; ++i) {
 			float raw_val = static_cast<float>(channelData[i]);
 
-			if (std::isnan(raw_val)) {
+			if (sycl::isnan(raw_val)) {
 				// Assign transparent black for NaNs
 				image_u8[4 * i + 0] = 0;
 				image_u8[4 * i + 1] = 0;

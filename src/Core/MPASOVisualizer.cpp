@@ -1,6 +1,10 @@
 ﻿#include "Core/MPASOVisualizer.h"
+#include "MPASOVisualizer.h"
+#include <bits/types/locale_t.h>
+#include <cstdlib>
 #include <tbb/parallel_for.h>
 #include <tbb/blocked_range.h>
+#include <vector>
 #if MOPS_VTK
 #include "IO/VTKFileManager.hpp"
 #endif
@@ -134,7 +138,7 @@ void MPASOVisualizer::VisualizeFixedLayer(MPASOField* mpasoF, VisualizationSetti
                 //1.2 Find all candidate vertices
                 size_t current_cell_vertices_idx[MAX_VERTEX_NUM];
                 SYCLKernel::GetCellVerticesIdx(cell_id, current_cell_vertices_number, current_cell_vertices_idx, MAX_VERTEX_NUM, max_edge, acc_verticesOnCell_buf);
-                bool is_land = SYCLKernel::IsInOcean(cell_id, max_edge, current_position, acc_numberVertexOnCell_buf, acc_verticesOnCell_buf, acc_vertexCoord_buf);
+                bool is_land = SYCLKernel::IsInMesh(cell_id, max_edge, current_position, acc_numberVertexOnCell_buf, acc_verticesOnCell_buf, acc_vertexCoord_buf);
                 if (!is_land)
                 {
                     SetPixel(img_acc, width_acc[0], height_acc[0], height_index, width_index, vec3_nan);
@@ -338,6 +342,7 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
             const int max_edge = (int)acc_grid_info_buf[2];
             const int MAX_VERTEX_NUM = 20;
             const int NEIGHBOR_NUM = 3;
+            const int ACTUALL_VERTEX_SIZE       = (int)acc_grid_info_buf[3];
             const int TOTAY_ZTOP_LAYER = (int)acc_grid_info_buf[4];
             const int MAX_VERTLEVELS = 100;
             const int VERTLEVELS = (int)acc_grid_info_buf[4];
@@ -360,8 +365,8 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
             // 1.2 Find all candidate vertices
             size_t current_cell_vertices_idx[MAX_VERTEX_NUM];
             SYCLKernel::GetCellVerticesIdx(cell_id, current_cell_vertices_number, current_cell_vertices_idx, MAX_VERTEX_NUM, max_edge, acc_verticesOnCell_buf);
-            bool is_land = SYCLKernel::IsInOcean(cell_id, max_edge, current_position, acc_numberVertexOnCell_buf, acc_verticesOnCell_buf, acc_vertexCoord_buf);
-            if (!is_land)
+            bool is_inMesh = SYCLKernel::IsInMesh(cell_id, max_edge, current_position, acc_numberVertexOnCell_buf, acc_verticesOnCell_buf, acc_vertexCoord_buf);
+            if (!is_inMesh)
             {
                 for (int i = 0; i < img_count; ++i)
                 {
@@ -373,105 +378,125 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
             vec3 imgValue = vec3_nan;
             double current_point_ztop_vec[MAX_VERTLEVELS];
 
-            vec3 current_cell_vertex_pos[MAX_VERTEX_NUM];
-            double current_cell_vertex_weight[MAX_VERTEX_NUM];
-            bool rc = SYCLKernel::GetCellVertexPos(current_cell_vertex_pos, current_cell_vertices_idx, MAX_VERTEX_NUM, current_cell_vertices_number, acc_vertexCoord_buf);
-            if (!rc)
-            {
-                out << "[ERROR]:: GetCellVertexPos Failed....(VLA < current_cell_vertices_number)" << sycl::endl;
-                return;
-            }
-            // washpress
-            Interpolator::CalcPolygonWachspress(current_position, current_cell_vertex_pos, current_cell_vertex_weight, current_cell_vertices_number);
-                      
-            for (auto k = 0; k < VERTLEVELS; ++k)
-            {
-                double current_point_ztop_in_layer = 0.0;
-                // Get the ztop of each vertex, and the non-existent vertex is set to NaN.
-                double current_cell_vertex_ztop[MAX_VERTEX_NUM];
-                for (auto v_idx = 0; v_idx < current_cell_vertices_number; v_idx++)
-                {
-                    auto VID = current_cell_vertices_idx[v_idx];
-                    double ztop = acc_cellVertexZTop_buf[VID * TOTAY_ZTOP_LAYER + k];
-                    current_cell_vertex_ztop[v_idx] = ztop;
-                }
-                for (auto v_idx = current_cell_vertices_number; v_idx < MAX_VERTEX_NUM; ++v_idx)
-                {
-                    current_cell_vertex_ztop[v_idx] = double_nan;
-                }
-                    
-                // Calculate the ZTOP of the current point
-                for (auto v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx)
-                {
-                    current_point_ztop_in_layer += current_cell_vertex_weight[v_idx] * current_cell_vertex_ztop[v_idx];
-                }
-                current_point_ztop_vec[k] = current_point_ztop_in_layer;
-            }
-            for (auto k = VERTLEVELS; k < MAX_VERTLEVELS; k++)
-            {
-                current_point_ztop_vec[k] = double_nan;
-            }
+            vec3   vpos[MAX_VERTEX_NUM];
+            double w[MAX_VERTEX_NUM];
 
-            const double EPSILON = 1e-6;
-            int local_layer = 0;
-            for (int k = 1; k < VERTLEVELS; ++k)
-            {
-                if (DEPTH <= current_point_ztop_vec[k - 1] - EPSILON && DEPTH >= current_point_ztop_vec[k] + EPSILON)
-                {
-                    local_layer = k;
-                    break;
-                }
-            }
-              
-            vec3 current_point_velocity_enu = {0.0, 0.0, 0.0};
-            vec3 current_point_attr_value = {0.0, 0.0, 0.0};
-            if (local_layer == 0)
-            {
+            if (!SYCLKernel::GetCellVertexPos(vpos, current_cell_vertices_idx, MAX_VERTEX_NUM,
+                                            current_cell_vertices_number, acc_vertexCoord_buf)) {
+                // 取不到顶点，按缺测处理
                 imgValue = vec3_nan;
-                for (int i = 0; i < img_count; ++i)
-                {
-                    SetPixel(img_accs[i], width, height, height_index, width_index, imgValue);
-                }
+                for (int i=0;i<img_count;++i) SetPixel(img_accs[i], width, height, height_index, width_index, imgValue);
                 return;
             }
-            else
-            {
-                double attr_value_vec[MAX_ATTRS];
-                auto layer = local_layer;
-                double ztop_layer1, ztop_layer2;
-                ztop_layer1 = current_point_ztop_vec[layer];
-                ztop_layer2 = current_point_ztop_vec[layer - 1];
-                double t = (sycl::fabs(DEPTH) - sycl::fabs(ztop_layer1)) / (sycl::fabs(ztop_layer2) - sycl::fabs(ztop_layer1));
-                double current_point_ztop;
-                current_point_ztop = t * ztop_layer1 + (1 - t) * ztop_layer2;
 
-                vec3 final_vel;
-                // Calculate the speed of these two layers.
-                vec3 vertex_vel1[MAX_VERTEX_NUM];
-                vec3 vertex_vel2[MAX_VERTEX_NUM];
-                vec3 current_point_vel1 = SYCLKernel::CalcVelocity(current_cell_vertices_idx, current_cell_vertex_weight, 
-                        MAX_VERTEX_NUM, current_cell_vertices_number, TOTAY_ZTOP_LAYER, layer, acc_cellVertexVelocity_buf);
-                
-                vec3 current_point_vel2 = SYCLKernel::CalcVelocity(current_cell_vertices_idx, current_cell_vertex_weight, 
-                    MAX_VERTEX_NUM, current_cell_vertices_number, TOTAY_ZTOP_LAYER, layer - 1, acc_cellVertexVelocity_buf);
-                
-                final_vel.x() = t * current_point_vel2.x() + (1 - t) * current_point_vel1.x();
-                final_vel.y() = t * current_point_vel2.y() + (1 - t) * current_point_vel1.y();
-                final_vel.z() = t * current_point_vel2.z() + (1 - t) * current_point_vel1.z();
-                        
-                double zional_velocity, merminoal_velicity;
-                GeoConverter::convertXYZVelocityToENU(current_position, final_vel, zional_velocity, merminoal_velicity);
-                double total_velocity = sycl::sqrt(zional_velocity * zional_velocity + merminoal_velicity * merminoal_velicity);
-                current_point_velocity_enu = {zional_velocity, merminoal_velicity, total_velocity};
+            // Wachspress
+            Interpolator::CalcPolygonWachspress(current_position, vpos, w, current_cell_vertices_number);
 
-                for (int attr_idx = 0; attr_idx < attr_count; ++attr_idx)
-                {
-                    double attr_value = SYCLKernel::CalcAttribute(current_cell_vertices_idx, current_cell_vertex_weight, 
-                        MAX_VERTEX_NUM, current_cell_vertices_number, TOTAY_ZTOP_LAYER, layer, acc_attr_bufs[attr_idx]);
-                    attr_value_vec[attr_idx] = attr_value;
-                    
+            // 每顶点层数（兼容 L 或 L+1）
+            const int ztop_levels = (int)(acc_cellVertexZTop_buf.get_range()[0] / ACTUALL_VERTEX_SIZE);
+
+            // 用 ztop_levels 做步幅
+            for (int k = 0; k < ztop_levels; ++k) {
+                double acc = 0.0;
+                for (int v = 0; v < current_cell_vertices_number; ++v) {
+                    int VID = current_cell_vertices_idx[v];
+                    double ztop = acc_cellVertexZTop_buf[VID * ztop_levels + k]; // ← 关键：用 ztop_levels
+                    acc += w[v] * ztop;
                 }
-                current_point_attr_value = {attr_value_vec[0], attr_value_vec[1], 0.0};
+                current_point_ztop_vec[k] = acc;
+            }
+
+            // 单调性修正（防微小反跳）
+            for (int k = 1; k < ztop_levels; ++k) {
+                if (current_point_ztop_vec[k] > current_point_ztop_vec[k-1]) {
+                    current_point_ztop_vec[k] = current_point_ztop_vec[k-1] - 1e-9;
+                }
+            }
+
+            // 深度包络判断（先做“是否湿”）
+            double z_surf = current_point_ztop_vec[0];
+            double z_bot  = current_point_ztop_vec[ztop_levels - 1];
+            if (z_surf < z_bot) { double t = z_surf; z_surf = z_bot; z_bot = t; }
+
+            double epsd = sycl::fmax(1e-6, 1e-8 * sycl::fabs(z_surf - z_bot));
+            // DEPTH 为负（-10）
+            if (!(DEPTH <= z_surf + epsd && DEPTH >= z_bot - epsd)) {
+                // 该深度为干：直接写 NaN / 陆地颜色
+                imgValue = vec3_nan;
+                for (int i=0;i<img_count;++i) SetPixel(img_accs[i], width, height, height_index, width_index, imgValue);
+                return;
+            }
+
+            // 找包含的界面对 (k-1,k)，允许边界
+            int local_layer = -1;
+            for (int k = 1; k < ztop_levels; ++k) {
+                double topI = current_point_ztop_vec[k-1];
+                double botI = current_point_ztop_vec[k];
+                if (topI < botI) { double t = topI; topI = botI; botI = t; }
+                if (DEPTH <= topI + 1e-8 && DEPTH >= botI - 1e-8) { local_layer = k; break; }
+            }
+            if (DEPTH <= current_point_ztop_vec[0])
+            {
+                local_layer = 0;
+            }
+            if (local_layer < 0) 
+            {
+                // 极端情况下兜底（可选）：最近界面对；不想兜底就保持 NaN
+                imgValue = vec3_nan;
+                for (int i=0;i<img_count;++i) SetPixel(img_accs[i], width, height, height_index, width_index, imgValue);
+                return;
+            }
+            // 找到 local_layer 后：
+            double topI = current_point_ztop_vec[local_layer-1];
+            double botI = current_point_ztop_vec[local_layer];
+            if (topI < botI) { double tmp = topI; topI = botI; botI = tmp; }
+
+            double denom  = topI - botI; // >0
+            double tparam = (denom > 1e-12) ? (DEPTH - botI) / denom : 0.5;
+
+            // 速度层数
+            const int vel_levels = (int)(acc_cellVertexVelocity_buf.get_range()[0] / ACTUALL_VERTEX_SIZE);
+            int j     = sycl::clamp(local_layer - 1, 0, vel_levels - 1);
+            int j_bot = sycl::min(j + 1, vel_levels - 1);
+            int j_top = j;
+
+            // 两层中心速度
+            vec3 v_top = SYCLKernel::CalcVelocity(current_cell_vertices_idx, w,
+                        MAX_VERTEX_NUM, current_cell_vertices_number, vel_levels, j_top, acc_cellVertexVelocity_buf);
+            vec3 v_bot = SYCLKernel::CalcVelocity(current_cell_vertices_idx, w,
+                        MAX_VERTEX_NUM, current_cell_vertices_number, vel_levels, j_bot, acc_cellVertexVelocity_buf);
+
+            // 缺测兜底
+            double mtop = YOSEF_LENGTH(v_top), mbot = YOSEF_LENGTH(v_bot);
+            vec3 final_vel;
+            if (mtop < 1e-12 && mbot < 1e-12)      final_vel = vec3{0.0,0.0,0.0};
+            else if (mtop < 1e-12)                 final_vel = v_bot;
+            else if (mbot < 1e-12)                 final_vel = v_top;
+            else                                    final_vel = (1.0 - tparam) * v_bot + tparam * v_top;
+
+            // ENU
+            double u_east, v_north;
+            GeoConverter::convertXYZVelocityToENU(current_position, final_vel, u_east, v_north);
+            double spd = sycl::sqrt(u_east*u_east + v_north*v_north);
+            vec3 current_point_velocity_enu = {u_east, v_north, spd};
+
+            // 属性（示例：前两张图用两个 attr）
+            vec3 current_point_attr_value = {0.0, 0.0, 0.0};
+            if (attr_count >= 1) {
+                const int attr_levels = (int)(acc_attr_bufs[0].get_range()[0] / ACTUALL_VERTEX_SIZE);
+                int aj     = sycl::clamp(local_layer - 1, 0, attr_levels - 1);
+                int aj_bot = sycl::min(aj + 1, attr_levels - 1);
+                // 简单：取 aj 层；如果要插值，再算 top/bot 后按 tparam 插
+                double a0 = SYCLKernel::CalcAttribute(current_cell_vertices_idx, w,
+                            MAX_VERTEX_NUM, current_cell_vertices_number, attr_levels, aj, acc_attr_bufs[0]);
+                current_point_attr_value.x() = a0;
+            }
+            if (attr_count >= 2) {
+                const int attr_levels1 = (int)(acc_attr_bufs[1].get_range()[0] / ACTUALL_VERTEX_SIZE);
+                int aj1 = sycl::clamp(local_layer - 1, 0, attr_levels1 - 1);
+                double a1 = SYCLKernel::CalcAttribute(current_cell_vertices_idx, w,
+                            MAX_VERTEX_NUM, current_cell_vertices_number, attr_levels1, aj1, acc_attr_bufs[1]);
+                current_point_attr_value.y() = a1;
             }
                 
             SetPixel(img_accs[0], width, height, height_index, width_index, current_point_velocity_enu);
@@ -812,7 +837,7 @@ vec3 normalize(const vec3& v)
 [[deprecated]]
 void rotateAroundAxis(const vec3& point, const vec3& axis, double theta_rad, double& x, double& y, double& z)
 {
-    // 传入的是弧度
+    // theta_rad is in radians
     double thetaRad = theta_rad;
     double cosTheta = sycl::cos(thetaRad);
     double sinTheta = sycl::sin(thetaRad);
@@ -893,6 +918,32 @@ bool compareTrajectoryLines(const std::vector<TrajectoryLine>& a, const std::vec
     return true;
 }
 
+std::vector<TrajectoryLine> MPASOVisualizer::removeNaNTrajectoriesAndReindex(std::vector<TrajectoryLine>& trajectory_lines)
+{
+    std::vector<int> hasNan(trajectory_lines.size(), 0);
+    tbb::parallel_for(size_t(0), trajectory_lines.size(), [&](size_t i) {
+        auto& line = trajectory_lines[i];
+        for (const auto& point : line.points) {
+            if (sycl::isnan(point.x()) || sycl::isnan(point.y()) || sycl::isnan(point.z())) {
+                hasNan[i] = 1;
+                break;
+            }
+        }
+    });
+
+    std::vector<TrajectoryLine> cleaned_trajectories;
+    cleaned_trajectories.reserve(trajectory_lines.size());
+    int new_index = 0;
+    for (size_t i = 0; i < trajectory_lines.size(); ++i) {
+        if (hasNan[i] == 0) {
+            auto& line = trajectory_lines[i];
+            line.lineID = new_index++;
+            cleaned_trajectories.push_back(line);
+        }
+    }
+    return cleaned_trajectories;
+}
+
 std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std::vector<CartesianCoord>& points, TrajectorySettings* config, std::vector<int>& default_cell_id, sycl::queue& sycl_Q)
 {
     
@@ -905,8 +956,8 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
     if (!update_vels.empty()) update_vels.clear();
     update_vels.resize(stable_points.size() * (config->simulationDuration / config->recordT));
 
-    std::cout << "points.size = " << stable_points.size() 
-          << ", default_cell_id.size = " << default_cell_id.size() << std::endl;
+    // std::cout << "points.size = " << stable_points.size() 
+    //       << ", default_cell_id.size = " << default_cell_id.size() << std::endl;
 
     std::vector<TrajectoryLine> trajectory_lines;
     trajectory_lines.resize(stable_points.size());
@@ -980,7 +1031,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
         auto acc_write_vels_buf = write_vels_buf.get_access<sycl::access::mode::write>(cgh);
         auto acc_sample_points_buf = sample_points_buf.get_access<sycl::access::mode::read_write>(cgh);
 
-        sycl::stream out(2048, 256, cgh);
+        sycl::stream out(4096, 256, cgh);
         int times = config->simulationDuration / config->deltaT;
         int each_points_size = config->simulationDuration / config->recordT;
         int recordT = config->recordT;
@@ -1022,20 +1073,102 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
             double pos_x, pos_y, pos_z;
             int cell_neig_vec[MAX_CELL_NEIGHBOR_NUM];
 
+            enum : int {
+                R_NONE=0,
+                R_FIND_FAIL=1,
+                R_NOT_IN_MESH=2,
+                R_NO_LAYER=3,
+                R_ZERO_DENOM=4,
+                R_VEL1_ZERO=5,
+                R_VEL2_ZERO=6,
+                R_FINAL_ZERO=7,
+                R_VLA_FAIL=8
+            };
+
+            auto RET0 = [&](int reason) -> vec3 {
+                if (global_id==-1 /*或你要追的粒子*/ ) {
+                    out << "[ZERO] gid="<<global_id<<" step="<< (int)(runTime/deltaT)
+                        <<" reason="<<reason<< sycl::endl;
+                }
+                return vec3(0.0);
+            };
+
+            auto FindContainingCell = [&](const vec3& pos, int& cid) -> bool {
+                const int nCells = (int)acc_cellCoord_buf.get_range()[0];
+
+                // A. cid 合法性检查 + 兜底（用最近中心猜一个起点）
+                if (cid < 0 || cid >= nCells) {
+                    int best = -1; double best_d = 1e300;
+                    for (int nid = 0; nid < nCells; ++nid) {
+                        double d = YOSEF_LENGTH(acc_cellCoord_buf[nid] - pos);
+                        if (d < best_d) { best_d = d; best = nid; }
+                    }
+                    if (best < 0) return false;
+                    cid = best;
+                }
+
+                // B. 先试当前 cid
+                if (SYCLKernel::IsInMesh(cid, ACTUALL_MAX_EDGE_SIZE, pos,
+                                        acc_numberVertexOnCell_buf, acc_verticesOnCell_buf, acc_vertexCoord_buf)) {
+                    return true;
+                }
+
+                // C. 读取一环邻居（nv 限幅；注意第四参是“容量”，别用 MAX_VERTEX_NUM）
+                int neigh[MAX_CELL_NEIGHBOR_NUM];
+                int nv = (int)acc_numberVertexOnCell_buf[cid];
+                nv = sycl::min(nv, MAX_CELL_NEIGHBOR_NUM - 1);
+                SYCLKernel::GetCellNeighborsIdx(cid, nv, neigh, MAX_CELL_NEIGHBOR_NUM,
+                                                ACTUALL_MAX_EDGE_SIZE, acc_cells_onCell_buf);
+
+                // D. 最近中心优先
+                int best = -1; double best_d = 1e300;
+                for (int i = 0; i <= nv; ++i) {
+                    int nid = neigh[i];
+                    if (nid < 0 || nid >= nCells) continue;
+                    double d = YOSEF_LENGTH(acc_cellCoord_buf[nid] - pos);
+                    if (d < best_d) { best_d = d; best = nid; }
+                }
+                if (best >= 0 && SYCLKernel::IsInMesh(best, ACTUALL_MAX_EDGE_SIZE, pos,
+                                                    acc_numberVertexOnCell_buf, acc_verticesOnCell_buf, acc_vertexCoord_buf)) {
+                    cid = best; return true;
+                }
+                // E. 穷举一环邻居做几何判定
+                for (int i = 0; i <= nv; ++i) {
+                    int nid = neigh[i];
+                    if (nid < 0 || nid >= nCells) continue;
+                    if (SYCLKernel::IsInMesh(nid, ACTUALL_MAX_EDGE_SIZE, pos,
+                                            acc_numberVertexOnCell_buf, acc_verticesOnCell_buf, acc_vertexCoord_buf)) {
+                        cid = nid; return true;
+                    }
+                }
+                return false;
+            };
+           
 
             auto CalcVelocityAt = [&](const vec3& pos, int& cid) -> vec3 {
+                const vec3 q = pos;                
+                if (!FindContainingCell(q, cid)) {
+                    // out << "DEBUG: Particle " << global_id 
+                    //     << " outside cell & neighbors; treat as land" 
+                    //     << " at timestep " << runTime << sycl::endl;
+                    RET0(R_FIND_FAIL);
+                }
+                const int cell_id = cid; 
+                
                 // 判断是否在大陆上
                 vec3 position = pos;
-                int cell_id = cid;
                 vec3 current_position = position;
                 auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
                 size_t current_cell_vertices_idx[MAX_VERTEX_NUM];
                 SYCLKernel::GetCellVerticesIdx(cell_id, current_cell_vertices_number, current_cell_vertices_idx, MAX_VERTEX_NUM, ACTUALL_MAX_EDGE_SIZE, acc_verticesOnCell_buf);
-                bool is_land = SYCLKernel::IsInOcean(cell_id, ACTUALL_MAX_EDGE_SIZE, current_position, acc_numberVertexOnCell_buf, acc_verticesOnCell_buf, acc_vertexCoord_buf);
-                if (!is_land)
+                
+                bool is_inMesh = SYCLKernel::IsInMesh(cell_id, ACTUALL_MAX_EDGE_SIZE, current_position, acc_numberVertexOnCell_buf, acc_verticesOnCell_buf, acc_vertexCoord_buf);
+                // True: in mesh -> in ocean
+                // False: Not in mesh -> in land
+                if (!is_inMesh)
                 {
-                    // out << "DEBUG: Particle " << global_id << " hit land at cell " << cell_id << sycl::endl;
-                    return vec3(0.0, 0.0, 0.0);
+                    // out << "DEBUG: Particle " << global_id << " hit land at cell " << cell_id << " " << runTime << sycl::endl;
+                    RET0(R_NOT_IN_MESH);
                 }
 
                 
@@ -1048,57 +1181,102 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                 if (!rc)
                 {
                     out << "[ERROR]:: GetCellVertexPos Failed....(VLA < current_cell_vertices_number)" << sycl::endl;
-                    return vec3(0.0, 0.0, 0.0);
+                    RET0(R_VLA_FAIL);
                 }
                 // washpress.
                 Interpolator::CalcPolygonWachspress(current_position, current_cell_vertex_pos, current_cell_vertex_weight, current_cell_vertices_number);
 
                 int ztop_range = acc_cellVertexZTop_buf.get_range()[0];
                 int vel_range = acc_cellVertexVelocity_buf.get_range()[0];
+                const int ztop_levels = acc_cellVertexZTop_buf.get_range()[0] / ACTUALL_VERTEX_SIZE;
 
-                for (auto k = 0; k < ACTUALL_ZTOP_LAYER; ++k)
+                // for (auto k = 0; k < ACTUALL_ZTOP_LAYER; ++k)
+                // {
+                //     double current_point_ztop_in_layer = 0.0;
+                //     // 获取每个顶点的ztop
+                //     double current_cell_vertex_ztop[MAX_VERTEX_NUM];
+                //     for (auto v_idx = 0; v_idx < current_cell_vertices_number; v_idx++)
+                //     {
+                //         auto VID = current_cell_vertices_idx[v_idx];
+                //         if (VID < 0 || VID >= acc_vertexCoord_buf.get_range()[0]) {
+                //             out << "[ERROR] Invalid VID: " << VID << sycl::endl;
+                //             RET0(R_VLA_FAIL);
+                //         }
+
+                //         double ztop = acc_cellVertexZTop_buf[VID * ACTUALL_ZTOP_LAYER + k];
+                //         current_cell_vertex_ztop[v_idx] = ztop;
+                //     }
+                //     // 计算当前点的ZTOP
+                //     for (auto v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx)
+                //     {
+                //         current_point_ztop_in_layer += current_cell_vertex_weight[v_idx] * current_cell_vertex_ztop[v_idx];
+                //     }
+                //     current_point_ztop_vec[k] = current_point_ztop_in_layer;
+                // }
+
+                for (int k = 0; k < ztop_levels; ++k) 
                 {
                     double current_point_ztop_in_layer = 0.0;
-                    // 获取每个顶点的ztop
                     double current_cell_vertex_ztop[MAX_VERTEX_NUM];
-                    for (auto v_idx = 0; v_idx < current_cell_vertices_number; v_idx++)
+                    for (int v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx) 
                     {
-                        auto VID = current_cell_vertices_idx[v_idx];
-                        if (VID < 0 || VID >= acc_vertexCoord_buf.get_range()[0]) {
-                            out << "[ERROR] Invalid VID: " << VID << sycl::endl;
-                            return vec3(0.0, 0.0, 0.0);
-                        }
-
-                        double ztop = acc_cellVertexZTop_buf[VID * ACTUALL_ZTOP_LAYER + k];
+                        int VID = current_cell_vertices_idx[v_idx];
+                        if (VID < 0 || VID >= acc_vertexCoord_buf.get_range()[0]) return RET0(R_VLA_FAIL);
+                        double ztop = acc_cellVertexZTop_buf[VID * ztop_levels + k]; // ← 用 ztop_levels 当步幅
                         current_cell_vertex_ztop[v_idx] = ztop;
                     }
-                    // 计算当前点的ZTOP
-                    for (auto v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx)
-                    {
+                    for (int v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx)
                         current_point_ztop_in_layer += current_cell_vertex_weight[v_idx] * current_cell_vertex_ztop[v_idx];
-                    }
                     current_point_ztop_vec[k] = current_point_ztop_in_layer;
                 }
 
-                const double EPSILON = 1e-6;
-                int local_layer = 0;
-                for (auto k = 1; k < ACTUALL_ZTOP_LAYER; ++k)
-                {
-                    if (fixed_depth <= current_point_ztop_vec[k - 1] - EPSILON && fixed_depth >= current_point_ztop_vec[k] + EPSILON)
-                    {
-                        local_layer = k;
+                // const double EPSILON = 1e-6;
+                // int local_layer = 0;
+                // for (auto k = 1; k < ACTUALL_ZTOP_LAYER; ++k)
+                // {
+                //     if (fixed_depth <= current_point_ztop_vec[k - 1] - EPSILON && fixed_depth >= current_point_ztop_vec[k] + EPSILON)
+                //     {
+                //         local_layer = k;
+                //         break;
+                //     }
+                // }
+
+                // const int ztop_levels = (int)(acc_cellVertexZTop_buf.get_range()[0] / ACTUALL_VERTEX_SIZE); // L 或 L+1
+
+                // 2) 填充 current_point_ztop_vec[0..ztop_levels-1]
+                //    （你已有的插值逻辑保持不变，只是循环上限用 ztop_levels）
+
+                // 2.1 可选：单调性修正（防微小反跳）
+                for (int k = 1; k < ztop_levels; ++k) {
+                    if (current_point_ztop_vec[k] > current_point_ztop_vec[k-1]) {
+                        // 强制非增（zTop 通常 0, -..., 更负）
+                        current_point_ztop_vec[k] = current_point_ztop_vec[k-1] - 1e-9;
+                    }
+                }
+
+                // 3) 找包含的“界面对”(k-1, k)。允许边界，加入相对 eps。
+                const double eps = 1e-8;                    // 米；也可用相对量：1e-10*|surface-bottom|
+                int local_layer = -1;
+                for (int k = 1; k < ztop_levels; ++k) {
+                    double topI = current_point_ztop_vec[k-1];
+                    double botI = current_point_ztop_vec[k];
+                    // 兼容可能的小反单调：确保 topI >= botI
+                    if (topI < botI) { double tmp = topI; topI = botI; botI = tmp; }
+                    if (fixed_depth <= topI + eps && fixed_depth >= botI - eps) {
+                        local_layer = k; // 处于 (k-1,k) 这对界面之间
                         break;
                     }
                 }
+
             
                 
-                if (local_layer == 0)
+                if (local_layer < 0)
                 {
-                    out << "DEBUG: Particle " << global_id << " depth layer not found. " 
-                    << "fixed_depth=" << fixed_depth 
-                    << " ztop_surface=" << current_point_ztop_vec[0] 
-                    << " ztop_bottom=" << current_point_ztop_vec[ACTUALL_ZTOP_LAYER-1] << sycl::endl;
-                    return vec3(0.0, 0.0, 0.0);
+                    // out << "DEBUG: Particle " << global_id << " depth layer not found. " 
+                    // << "fixed_depth=" << fixed_depth 
+                    // << " ztop_surface=" << current_point_ztop_vec[0] 
+                    // << " ztop_bottom=" << current_point_ztop_vec[ztop_levels-1] << sycl::endl;
+                    return RET0(R_NO_LAYER);
                 }
                 else
                 {
@@ -1110,7 +1288,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                     double denominator = sycl::fabs(ztop_layer2) - sycl::fabs(ztop_layer1);
                     if (sycl::fabs(denominator) < 1e-12) {
                         out << "DEBUG: Particle " << global_id << " has zero depth difference: " << denominator << sycl::endl;
-                        return vec3(0.0, 0.0, 0.0);
+                        return RET0(R_ZERO_DENOM);
                     }
                     // double current_point_ztop;
                     // current_point_ztop = t * ztop_layer1 + (1 - t) * ztop_layer2;
@@ -1127,10 +1305,14 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                     
                     double vel1_mag = YOSEF_LENGTH(current_point_vel1);
                     double vel2_mag = YOSEF_LENGTH(current_point_vel2);
-                        
-                    if (vel1_mag < 1e-12 || vel2_mag < 1e-12) {
-                            out << "DEBUG: Particle " << global_id << " layer velocities are zero" << sycl::endl;
-                            return vec3(0.0, 0.0, 0.0);
+
+                    if (vel1_mag < 1e-12 ) {
+                        // out << "DEBUG: Particle " << global_id << " layer velocities are zero" << sycl::endl;
+                        return RET0(R_VEL1_ZERO);
+                    }
+                    if (vel2_mag < 1e-12 ) {
+                        // out << "DEBUG: Particle " << global_id << " layer velocities are zero" << sycl::endl;
+                        return RET0(R_VEL2_ZERO);
                     }
 
                     final_vel.x() = t * current_point_vel2.x() + (1 - t) * current_point_vel1.x();
@@ -1142,7 +1324,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                     double vel_mag = YOSEF_LENGTH(current_velocity);
                     if (vel_mag < 1e-12) {
                         out << "DEBUG: Particle " << global_id << " has zero velocity: " << vel_mag << sycl::endl;
-                        return vec3(0.0, 0.0, 0.0);
+                        return RET0(R_FINAL_ZERO);
                     }
                     return current_velocity;
                 }
@@ -1163,17 +1345,19 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                 
                 runTime += deltaT;
                 position = acc_sample_points_buf[global_id];
+                
                 int firtst_cell_id = acc_def_cell_id_buf[global_id];
                 // 第一次循环
                 if (bFirstLoop)
                 {
                     bFirstLoop = false;
                     cell_id = firtst_cell_id;
-                    
+                    FindContainingCell(position, cell_id);
                     // 找到这个CELL有多少个点
                     auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
                     SYCLKernel::GetCellNeighborsIdx(cell_id, current_cell_vertices_number, cell_neig_vec, MAX_VERTEX_NUM, ACTUALL_MAX_EDGE_SIZE, acc_cells_onCell_buf);
-                    
+                   
+
                     int acc_wirte_pints_idx = base_idx + 0;
                     acc_wirte_points_buf[acc_wirte_pints_idx] = position;
                 }
@@ -1196,7 +1380,8 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                         }
                     }
                     SYCLKernel::GetCellNeighborsIdx(cell_id, current_cell_vertices_number, cell_neig_vec, MAX_VERTEX_NUM, ACTUALL_MAX_EDGE_SIZE, acc_cells_onCell_buf);
-                   
+                    
+
                 }
 
                 // TEST
@@ -1207,7 +1392,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                 auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
                 size_t current_cell_vertices_idx[MAX_VERTEX_NUM];
                 SYCLKernel::GetCellVerticesIdx(cell_id, current_cell_vertices_number, current_cell_vertices_idx, MAX_VERTEX_NUM, ACTUALL_MAX_EDGE_SIZE, acc_verticesOnCell_buf);
-                bool is_land = SYCLKernel::IsInOcean(cell_id, ACTUALL_MAX_EDGE_SIZE, current_position, acc_numberVertexOnCell_buf, acc_verticesOnCell_buf, acc_vertexCoord_buf);
+                bool is_land = SYCLKernel::IsInMesh(cell_id, ACTUALL_MAX_EDGE_SIZE, current_position, acc_numberVertexOnCell_buf, acc_verticesOnCell_buf, acc_vertexCoord_buf);
                 if (is_land)
                 {
                     continue;
@@ -1306,12 +1491,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                 double r = YOSEF_LENGTH(current_position);
                 double dt = static_cast<double>(deltaT);
                 vec3 k1 = CalcVelocityAt(position, cell_id);
-                double speed_k1 = YOSEF_LENGTH(k1);
-                if (speed_k1 < 1e-12) {
-                    out << "DEBUG: Particle " << global_id << " has zero velocity at time " << runTime << sycl::endl;
-                    return;
-                }
-                // // p + 0.5 * k1 Δt   → 归一化回球面
+                // // p + 0.5 * k1 Δt   
                 // vec3 p2   = sycl::normalize(position + (dt * 0.5) * k1) * r;
                 // int  cid2 = cell_id;
                 // vec3 k2   = CalcVelocityAt(p2, cid2);
@@ -1323,17 +1503,23 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                 // vec3 p4   = sycl::normalize(position + dt * k3) * r;
                 // int  cid4 = cell_id;
                 // vec3 k4   = CalcVelocityAt(p4, cid4);
-                // // 组合平均速度
                 // vec3 current_velocity = (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0;
-
                 vec3 current_velocity = k1;
 
+                
+                
 
                 
                 vec3 rotationAxis = SYCLKernel::CalcRotationAxis(current_position, current_velocity);
                 double speed = YOSEF_LENGTH(current_velocity);
                 double theta_rad = (speed * deltaT) / r;
                 new_position = SYCLKernel::CalcPositionAfterRotation(current_position, rotationAxis, theta_rad);
+                // out << "DEBUG: Particle " << global_id 
+                //         << " at timestep " << runTime 
+                //         << " at position " << current_position.x() << " " << current_position.y() << " " << current_position.z()
+                //         << " at velocity " << current_velocity.x() << " " << current_velocity.y() << " " << current_velocity.z()
+                //         << " at new position " << new_position.x() << " " << new_position.y() << " " << new_position.z()
+                //         << sycl::endl;
                    
                 if (bFirstVel)
                 {
@@ -1394,8 +1580,11 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
             }
         }
     });
-
-    return trajectory_lines;
+    std::cout << "traj size " << trajectory_lines.size() << std::endl; 
+    auto clean_traj = removeNaNTrajectoriesAndReindex(trajectory_lines);
+    std::cout << "clean traj size " << clean_traj.size() << std::endl;
+    trajectory_lines.clear();
+    return clean_traj;
 }
 
 std::vector<TrajectoryLine> MPASOVisualizer::PathLine(MPASOField* mpasoF, std::vector<CartesianCoord>& points, TrajectorySettings* config, std::vector<int>& default_cell_id, sycl::queue& sycl_Q)
@@ -1533,7 +1722,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(MPASOField* mpasoF, std::v
                 auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
                 size_t current_cell_vertices_idx[MAX_VERTEX_NUM];
                 SYCLKernel::GetCellVerticesIdx(cell_id, current_cell_vertices_number, current_cell_vertices_idx, MAX_VERTEX_NUM, ACTUALL_MAX_EDGE_SIZE, acc_verticesOnCell_buf);
-                bool is_land = SYCLKernel::IsInOcean(cell_id, ACTUALL_MAX_EDGE_SIZE, current_position, acc_numberVertexOnCell_buf, acc_verticesOnCell_buf, acc_vertexCoord_buf);
+                bool is_land = SYCLKernel::IsInMesh(cell_id, ACTUALL_MAX_EDGE_SIZE, current_position, acc_numberVertexOnCell_buf, acc_verticesOnCell_buf, acc_vertexCoord_buf);
                 if (!is_land)
                 {
                     return vec3(0.0, 0.0, 0.0);
@@ -1686,6 +1875,8 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(MPASOField* mpasoF, std::v
                     auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
                     SYCLKernel::GetCellNeighborsIdx(cell_id, current_cell_vertices_number, cell_neig_vec, MAX_VERTEX_NUM, ACTUALL_MAX_EDGE_SIZE, acc_cells_onCell_buf);
                     
+
+
                     int acc_wirte_pints_idx = base_idx + 0;
                     acc_wirte_points_buf[acc_wirte_pints_idx] = position;
                 }
@@ -1719,7 +1910,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(MPASOField* mpasoF, std::v
                 auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
                 size_t current_cell_vertices_idx[MAX_VERTEX_NUM];
                 SYCLKernel::GetCellVerticesIdx(cell_id, current_cell_vertices_number, current_cell_vertices_idx, MAX_VERTEX_NUM, ACTUALL_MAX_EDGE_SIZE, acc_verticesOnCell_buf);
-                bool is_land = SYCLKernel::IsInOcean(cell_id, ACTUALL_MAX_EDGE_SIZE, current_position, acc_numberVertexOnCell_buf, acc_verticesOnCell_buf, acc_vertexCoord_buf);
+                bool is_land = SYCLKernel::IsInMesh(cell_id, ACTUALL_MAX_EDGE_SIZE, current_position, acc_numberVertexOnCell_buf, acc_verticesOnCell_buf, acc_vertexCoord_buf);
                 if (is_land)
                 {
                     continue;
