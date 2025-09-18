@@ -14,6 +14,7 @@ build*
 third_part/*.*
 third_part
 tools/pyMOPS/build
+tools/pyMOPS/pyMOPS/pyMOPS.so
 ndarray
 pybind11
 vtk

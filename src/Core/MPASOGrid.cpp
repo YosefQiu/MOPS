@@ -1,5 +1,7 @@
 ﻿#include "Core/MPASOGrid.h"
 #include "Utils/Utils.hpp"
+#include <fstream>
+#include <unistd.h>
 
 using namespace MOPS;
 
@@ -17,8 +19,62 @@ void MPASOGrid::initGrid_DemoLoading(const char* yaml_path)
     std::string fileName = removeFileExtension(stream->substreams[0]->filenames[0]);
 	std::string dataDir = createDataPath(".data", fileName);
 	this->initGrid(gs.get(), MOPS::MPASOReader::readGridInfo(grid_path).get());
-    this->mDataDir = dataDir;
+    this->mCachedDataDir = dataDir;
     this->mMeshName = fileName;
+    this->mFolderPath = stream->path_prefix;
+    
+}
+
+void MPASOGrid::initGrid_FromBin(const char* prefix)
+{
+
+    
+      
+//      /global/cfs/projectdirs/m4259/yitang/blockdata/0_Vertical_vector.bin
+// /global/cfs/projectdirs/m4259/yitang/blockdata/0_Horizontal_vector.bin  
+// /global/cfs/projectdirs/m4259/yitang/blockdata/0_LayerThickness.bin     /global/cfs/projectdirs/m4259/yitang/blockdata/0_ZTop.bin
+// /global/cfs/projectdirs/m4259/yitang/blockdata/0_MaxLevelCell.bin
+
+    readFromBlock_Vec3(std::string(prefix) + "CellCoord.bin", cellCoord_vec);
+    readFromBlock_Vec3(std::string(prefix) + "VertexCoord.bin", vertexCoord_vec);
+    readFromBlock_IntBasedK(std::string(prefix) + "VerticesOnCell.bin", verticesOnCell_vec);
+    readFromBlock_IntBasedK(std::string(prefix) + "CellsOnCell.bin", cellsOnCell_vec);
+    readFromBlock_IntBasedK(std::string(prefix) + "CellsOnVertex.bin", cellsOnVertex_vec, 3);
+    readFromBlock_Int(std::string(prefix) + "NumVerticesOnCell.bin", numberVertexOnCell_vec);
+    
+    std::string fileName = "blockData";
+    std::string dataDir = createDataPath(".data", fileName);
+    this->mCachedDataDir = dataDir;
+    this->mMeshName = fileName;
+
+
+        // std::vector<size_t>		verticesOnEdge_vec;
+        
+       
+     
+        // std::vector<size_t>     cellsOnEdge_vec;
+        // std::vector<size_t>     edgesOnCell_vec;
+        // std::vector<float>      cellWeight_vec;
+    mCellsSize = cellCoord_vec.size();
+    mVertexSize = vertexCoord_vec.size();
+    mEdgesSize = 0;
+    mMaxEdgesSize = 8;
+    
+    mTimesteps = 0;
+    mVertLevels = 80;
+    mVertLevelsP1 = 80;
+
+    std::cout << "mCellsSize size " << mCellsSize << std::endl;
+    std::cout << "mVertexSize size " << mVertexSize << std::endl;
+    std::cout << "mEdgesSize size " << mEdgesSize << std::endl;
+    std::cout << "mMaxEdgesSize size " << mMaxEdgesSize << std::endl;
+    std::cout << "mTimesteps size " << mTimesteps << std::endl;
+    std::cout << "mVertLevels size " << mVertLevels << std::endl;
+    std::cout << "mVertLevelsP1 size " << mVertLevelsP1 << std::endl;
+    std::cout << "cellsOnVertex_vec size " << cellsOnVertex_vec.size() << std::endl;
+    std::cout << "cellsOnCell_vec size " << cellsOnCell_vec.size() << std::endl;
+    std::cout << "verticesOnCell_vec size " << verticesOnCell_vec.size() << std::endl; 
+
 
 }
 
@@ -129,30 +185,32 @@ void MPASOGrid::setGridAttributesFloat(GridAttributeType type, const std::vector
 }
 
 
-[[deprecated]]
+
 void MPASOGrid::initGrid(MPASOReader* reader)
 {
     this->mCellsSize    = reader->mCellsSize;
     this->mEdgesSize    = reader->mEdgesSize;
     this->mMaxEdgesSize = reader->mMaxEdgesSize;
     this->mVertexSize   = reader->mVertexSize;
-
-    this->mTimesteps    = reader->mTimesteps;
     this->mVertLevels   = reader->mVertLevels;
     this->mVertLevelsP1 = reader->mVertLevelsP1;
 
     this->vertexCoord_vec           = std::move(reader->vertexCoord_vec);
     this->cellCoord_vec             = std::move(reader->cellCoord_vec);
     this->edgeCoord_vec             = std::move(reader->edgeCoord_vec);
+
     this->vertexLatLon_vec          = std::move(reader->vertexLatLon_vec);
     this->verticesOnCell_vec        = std::move(reader->verticesOnCell_vec);
+    this->verticesOnEdge_vec        = std::move(reader->verticesOnEdge_vec);
     this->cellsOnVertex_vec         = std::move(reader->cellsOnVertex_vec);
     this->cellsOnCell_vec           = std::move(reader->cellsOnCell_vec);
     this->numberVertexOnCell_vec    = std::move(reader->numberVertexOnCell_vec);
     this->cellsOnEdge_vec           = std::move(reader->cellsOnEdge_vec);
     this->edgesOnCell_vec           = std::move(reader->edgesOnCell_vec);
 
- 
+    auto cachedFileName = reader->mMeshName;
+    this->mMeshName = reader->mMeshName;
+	this->mCachedDataDir = createDataPath(".data", cachedFileName);
 }
 
 void MPASOGrid::initGrid(ftk::ndarray_group* g, MPASOReader* reader)
@@ -180,13 +238,13 @@ void MPASOGrid::initGrid(ftk::ndarray_group* g, MPASOReader* reader)
     copyFromNdarray_Int(g, "edgesOnCell", this->edgesOnCell_vec);
 
    
-
-
+    
 }
 
 void MPASOGrid::createKDTree(const char* kdTree_path, sycl::queue& SYCL_Q)
 {
 #if _WIN32 || __linux__
+    std::cout << "kDTree Path: " << kdTree_path << std::endl;
     std::ifstream f_in(kdTree_path, std::ifstream::binary);
     if (!f_in)
     {
@@ -194,7 +252,11 @@ void MPASOGrid::createKDTree(const char* kdTree_path, sycl::queue& SYCL_Q)
         if (mKDTree) throw std::runtime_error("KDTree already exists!");
         mKDTree = std::make_unique<KDTree_t>(3, cellCoord_vec, 10, 5, true);
         std::ofstream f_out(kdTree_path, std::ofstream::binary);
-        if (!f_out) throw std::runtime_error("Error writing index file!");
+        if (!f_out) 
+        {
+            throw std::system_error(errno, std::generic_category(),
+                std::string("[MPASOGrid]::createKDTree: Error writing index file: ") + kdTree_path);
+        }
         mKDTree->index->saveIndex(f_out);
         Debug("[MPASOGrid]::Create KD Tree...");
         Debug("[MPASOGrid]::Saved KD Tree in [ %s ]", kdTree_path);
@@ -364,91 +426,170 @@ void MPASOGrid::copyFromNdarray_Vec3(ftk::ndarray_group* g, std::string xValue, 
     }
     else
     {
-        std::cout << "Error: Missing data in ndarray_group for " << name << std::endl;
+        std::cout << "[MPASOGrid]::Error: Missing data in ndarray_group for " << name << std::endl;
     }
+}
+
+void MPASOGrid::readFromBlock_Vec3(const std::string& filename, std::vector<vec3>& vec)
+{
+    std::ifstream file(filename, std::ios::binary);
+    if (!file.is_open())
+    {
+        std::cerr << "[MPASOGrid]::Error: Unable to open file " << filename << std::endl;
+        return;
+    }
+
+    vec.clear();
+    int dataSize;
+    file.read(reinterpret_cast<char*>(&dataSize), sizeof(int));
+    vec.resize(dataSize);
+    for (std::size_t i = 0; i < dataSize; ++i)
+    {
+        double x, y, z;
+        file.read(reinterpret_cast<char*>(&x), sizeof(double));
+        file.read(reinterpret_cast<char*>(&y), sizeof(double));
+        file.read(reinterpret_cast<char*>(&z), sizeof(double));
+        vec3 data = vec3{x, y, z};
+        vec[i] = data;
+    }
+    file.close();
+}
+
+void MPASOGrid::readFromBlock_Int(const std::string& filename, std::vector<size_t>& vec)
+{
+    std::ifstream file(filename, std::ios::binary);
+    if (!file.is_open())
+    {
+        std::cerr << "[MPASOGrid]::Error: Unable to open file " << filename << std::endl;
+        return;
+    }
+
+    vec.clear();
+    int dataSize;
+    file.read(reinterpret_cast<char*>(&dataSize), sizeof(int));
+    vec.resize(dataSize);
+    for (std::size_t i = 0; i < dataSize; ++i)
+    {
+        int value;
+        file.read(reinterpret_cast<char*>(&value), sizeof(int));
+        size_t value_t = static_cast<size_t>(value);
+        vec[i] = value_t;
+    }
+    file.close();
+}
+
+void MPASOGrid::readFromBlock_IntBasedK(const std::string& filename, std::vector<size_t>& vec, int K)
+{
+    std::ifstream file(filename, std::ios::binary);
+    if (!file.is_open())
+    {
+        std::cerr << "[MPASOGrid]::Error: Unable to open file " << filename << std::endl;
+        return;
+    }
+
+    vec.clear();
+    int dataSize;
+    int k;
+    file.read(reinterpret_cast<char*>(&dataSize), sizeof(int));
+    if (K == -1)
+        file.read(reinterpret_cast<char*>(&k), sizeof(int));
+    else
+        k = K;
+    vec.resize(dataSize * k);
+    for (int i = 0; i < dataSize; i++)
+    {
+        for (int j = 0; j < k; j++) {
+            int localVertexId;
+            file.read(reinterpret_cast<char*>(&localVertexId), sizeof(int));
+            vec[i * k + j] = static_cast<size_t>(localVertexId);
+        }
+    }
+    file.close();
+    K = k;
+    std::cout << "[MPASOGrid]::Info: Loaded " << filename << " with " << dataSize << " entries and " << k << " components each." << std::endl;
 }
 
 bool MPASOGrid::checkAttribute()
 {
     if (this->mCellsSize == 0)
     {
-        std::cout << "Error: mCellsSize is not set" << std::endl;
+        std::cout << "[MPASOGrid]::Error: mCellsSize is not set" << std::endl;
         return false;
     }
-    if (this->mEdgesSize == 0)
-    {
-        std::cout << "Error: mEdgesSize is not set" << std::endl;
-        return false;
-    }
+    // if (this->mEdgesSize == 0)//TODO
+    // {
+    //     std::cout << "[MPASOGrid]::Error: mEdgesSize is not set" << std::endl;
+    //     return false;
+    // }
     if (this->mVertexSize == 0)
     {
-        std::cout << "Error: mVertexSize is not set" << std::endl;
+        std::cout << "[MPASOGrid]::Error: mVertexSize is not set" << std::endl;
         return false;
     }
     if (this->mMaxEdgesSize == 0)
     {
-        std::cout << "Error: mMaxEdgesSize is not set" << std::endl;
+        std::cout << "[MPASOGrid]::Error: mMaxEdgesSize is not set" << std::endl;
         return false;
     }
     if (this->mVertLevels == 0)
     {
-        std::cout << "Error: mVertLevels is not set" << std::endl;
+        std::cout << "[MPASOGrid]::Error: mVertLevels is not set" << std::endl;
         return false;
     }
     if (this->mVertLevelsP1 == 0)
     {
-        std::cout << "Error: mVertLevelsP1 is not set" << std::endl;
+        std::cout << "[MPASOGrid]::Error: mVertLevelsP1 is not set" << std::endl;
         return false;
     }
     if (this->cellCoord_vec.size() < 1)
     {
-        std::cout << "Error: cellCoord_vec is not set" << std::endl;
+        std::cout << "[MPASOGrid]::Error: cellCoord_vec is not set" << std::endl;
         return false;
     }
     if (this->vertexCoord_vec.size() < 1)
     {
-        std::cout << "Error: vertexCoord_vec is not set" << std::endl;
+        std::cout << "[MPASOGrid]::Error: vertexCoord_vec is not set" << std::endl;
         return false;
     }
-    if (this->edgeCoord_vec.size() < 1)
-    {
-        std::cout << "Error: edgeCoord_vec is not set" << std::endl;
-        return false;
-    }
+    // if (this->edgeCoord_vec.size() < 1)
+    // {
+    //     std::cout << "[MPASOGrid]::Error: edgeCoord_vec is not set" << std::endl;
+    //     return false;
+    // }
     if (this->verticesOnCell_vec.size() < 1)
     {
-        std::cout << "Error: verticesOnCell_vec is not set" << std::endl;
+        std::cout << "[MPASOGrid]::Error: verticesOnCell_vec is not set" << std::endl;
         return false;
     }
-    if (this->verticesOnEdge_vec.size() < 1)
-    {
-        std::cout << "Error: verticesOnEdge_vec is not set" << std::endl;
-        return false;
-    }
+    // if (this->verticesOnEdge_vec.size() < 1)
+    // {
+    //     std::cout << "[MPASOGrid]::Error: verticesOnEdge_vec is not set" << std::endl;
+    //     return false;
+    // }
     if (this->cellsOnVertex_vec.size() < 1)
     {
-        std::cout << "Error: cellsOnVertex_vec is not set" << std::endl;
+        std::cout << "[MPASOGrid]::Error: cellsOnVertex_vec is not set" << std::endl;
         return false;
     }
     if (this->cellsOnCell_vec.size() < 1)
     {
-        std::cout << "Error: cellsOnCell_vec is not set" << std::endl;
+        std::cout << "[MPASOGrid]::Error: cellsOnCell_vec is not set" << std::endl;
         return false;
     }
     if (this->numberVertexOnCell_vec.size() < 1)
     {
-        std::cout << "Error: numberVertexOnCell_vec is not set" << std::endl;
+        std::cout << "[MPASOGrid]::Error: numberVertexOnCell_vec is not set" << std::endl;
         return false;
     }
-    if (this->cellsOnEdge_vec.size() < 1)
-    {
-        std::cout << "Error: cellsOnEdge_vec is not set" << std::endl;
-        return false;
-    }
-    if (this->edgesOnCell_vec.size() < 1)
-    {
-        std::cout << "Error: edgesOnCell_vec is not set" << std::endl;
-        return false;
-    }
+    // if (this->cellsOnEdge_vec.size() < 1)
+    // {
+    //     std::cout << "[MPASOGrid]::Error: cellsOnEdge_vec is not set" << std::endl;
+    //     return false;
+    // }
+    // if (this->edgesOnCell_vec.size() < 1)
+    // {
+    //     std::cout << "[MPASOGrid]::Error: edgesOnCell_vec is not set" << std::endl;
+    //     return false;
+    // }
     return true;
 }

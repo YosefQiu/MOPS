@@ -73,9 +73,10 @@ namespace MOPS
      * This function sets the active attribute for the specified timestep.
      * It allows you to switch between different attributes at runtime.
      *
-     * @param timestep The timestep to activate.
+     * @param t1 The first timestep to activate.
+     * @param t2 (Optional) The second timestep for time-varying attributes.
      */
-    void MOPS_ActiveAttribute(int timestep);
+    void MOPS_ActiveAttribute(int t1, std::optional<int> t2 = std::nullopt);
 
     /**
      * @brief Perform remapping-based rendering for fixed-depth or fixed-layer visualizations.

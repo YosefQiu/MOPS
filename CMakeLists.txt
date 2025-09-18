@@ -34,7 +34,7 @@ endif()
 
 if (MOPS_MPI)
   set(MMPI "/opt/cray/pe/mpich/8.1.25/ofi/cray/10.0")
-  set(MFAB "/opt/cray/libfabric/1.20.1")
+  set(MFAB "/opt/cray/libfabric/1.22.0")
   set(MGTL "/opt/cray/pe/mpich/8.1.25/gtl")
   add_compile_definitions(MOPS_MPI=1)
 

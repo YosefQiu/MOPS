@@ -210,6 +210,7 @@ PYBIND11_MODULE(pyMOPS, m) {
     py::class_<MOPS::TrajectoryLine>(m, "TrajectoryLine")
         .def_readwrite("lineID", &MOPS::TrajectoryLine::lineID)
         .def_readwrite("points", &MOPS::TrajectoryLine::points)
+        .def_readwrite("velocity", &MOPS::TrajectoryLine::velocity)
         .def_readwrite("lastPoint", &MOPS::TrajectoryLine::lastPoint)
         .def_readwrite("duration", &MOPS::TrajectoryLine::duration)
         .def_readwrite("timestamp", &MOPS::TrajectoryLine::timestamp)
@@ -292,14 +293,17 @@ PYBIND11_MODULE(pyMOPS, m) {
 
             py::list py_lines;
             for (const auto& line : traj_lines) {
-                std::vector<ssize_t> shape = {static_cast<ssize_t>(line.points.size()), 3};
-                std::vector<ssize_t> strides = {sizeof(double) * 3, sizeof(double)};
+                std::vector<ssize_t> shape = {static_cast<ssize_t>(line.points.size()), 6};
+                std::vector<ssize_t> strides = {sizeof(double) * 6, sizeof(double)};
                 py::array_t<double> arr(shape, strides);
                 auto buf = arr.mutable_unchecked<2>();
                 for (size_t i = 0; i < line.points.size(); ++i) {
                     buf(i, 0) = line.points[i].x();
                     buf(i, 1) = line.points[i].y();
                     buf(i, 2) = line.points[i].z();
+                    buf(i, 3) = line.velocity[i].x();
+                    buf(i, 4) = line.velocity[i].y();
+                    buf(i, 5) = line.velocity[i].z();
                 }
                 py_lines.append(arr);
             }
@@ -308,3 +312,4 @@ PYBIND11_MODULE(pyMOPS, m) {
         },
         "Run streamline simulation");
 }
+

@@ -9,7 +9,10 @@ namespace MOPS
 {
     enum class CalcPositionType : int { kCenter, kVertx, kPoint, kCount };
     enum class CalcAttributeType : int { kZonalMerimoal, kVelocity, kZTop, kTemperature, kSalinity, kAll, kCount };
+    enum class CalcDirection:int {kForward, kBackward, kCount};
+    enum class CalcMethodType:int {kRK4, kEuler, kCount};
     enum class VisualizeType : int {kFixedLayer, kFixedDepth};
+    
     enum class SaveType : int {kVTI, kPNG, kNone, kCount};
 
     struct VisualizationSettings
@@ -67,6 +70,8 @@ namespace MOPS
         int lineID;
         std::vector<CartesianCoord> points;
         std::vector<CartesianCoord> velocity;
+        std::vector<double> temperature;
+        std::vector<double> salinity;
         CartesianCoord lastPoint;
         double duration;
         double timestamp;
@@ -82,11 +87,13 @@ namespace MOPS
 
     struct TrajectorySettings
     {
-        size_t deltaT;   // 相隔多少秒计算一次 新的位置
-        size_t simulationDuration; //要模拟的总时长
-        size_t recordT; // 相隔多少秒存储一次 新的位置
+        size_t deltaT;              // How many seconds to calculate the new position?
+        size_t simulationDuration;  // Total simulation duration in seconds
+        size_t recordT;             // How many seconds between recording new positions
         float depth;
         std::string fileName;
+        CalcDirection directionType = CalcDirection::kForward;
+        CalcMethodType methodType = CalcMethodType::kEuler;
     };
 
     class MPASOVisualizer

@@ -31,7 +31,7 @@ namespace MOPS
         void addGrid(std::shared_ptr<MPASOGrid> grid);
         void addSol(int timestep, std::shared_ptr<MPASOSolution> sol);
         void addField();
-        void activeAttribute(int timestep);
+        void activeAttribute(int t1, std::optional<int> t2 = std::nullopt);
         std::vector<TrajectoryLine> runStreamLine(TrajectorySettings* config, std::vector<CartesianCoord>& sample_points);
         std::vector<TrajectoryLine> runPathLine(TrajectorySettings* config, std::vector<CartesianCoord>& sample_points, std::vector<int>& timestep_vec);
         std::vector<ImageBuffer<double>> runRemapping(VisualizationSettings* config);

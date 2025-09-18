@@ -1,5 +1,5 @@
 #pragma once
-#include "Core/MPASOReader.h"
+#include "IO/MPASOReader.h"
 #include "Utils/KDTree.h"
 #include "Utils/Interpolation.hpp"
 #include "ndarray/ndarray_group_stream.hh"
@@ -57,7 +57,8 @@ namespace MOPS
         int mVertLevelsP1 = 0;
     public:
         std::string mMeshName;
-        std::string mDataDir;
+        std::string mCachedDataDir;
+        std::string mFolderPath;
     public:
         std::vector<vec3>		vertexCoord_vec;
         std::vector<vec3>		cellCoord_vec;
@@ -74,8 +75,9 @@ namespace MOPS
         std::vector<float>      cellWeight_vec;
 
     public:
-        [[deprecated]] void initGrid(MPASOReader* reader);
+        void initGrid(MPASOReader* reader);
         void initGrid_DemoLoading(const char* yaml_path);
+        void initGrid_FromBin(const char* prefix);
         void initGrid(ftk::ndarray_group* g, MPASOReader* reader = nullptr);
         void createKDTree(const char* kdTree_path, sycl::queue& SYCL_Q);
         void searchKDT(const CartesianCoord& point, int& cell_id);
@@ -91,10 +93,13 @@ namespace MOPS
         void getCellsOnVertex(const size_t vertex_id, std::vector<size_t>& cell_on_vertex, std::vector<size_t>& cell_id);
         void getCellsOnEdge(const size_t edge_id, std::vector<size_t>& cell_on_edge, std::vector<size_t>& cell_id);
         void getEdgesOnCell(const size_t cell_id, std::vector<size_t>& edge_on_cell, std::vector<size_t>& edge_id);
-        
+        std::string getFolderPath() const { return mFolderPath; }   
         bool checkAttribute();
     private:
-        
+        void readFromBlock_Vec3(const std::string& filename, std::vector<vec3>& vec);    
+        void readFromBlock_Int(const std::string& filename, std::vector<size_t>& vec);
+        void readFromBlock_IntBasedK(const std::string& filename, std::vector<size_t>& vec, int K = -1);
+
         void copyFromNdarray_Int(ftk::ndarray_group* g, std::string value, std::vector<size_t>& vec);
         void copyFromNdarray_Vec2(ftk::ndarray_group* g, std::string xValue, std::string yValue, std::vector<vec2>& vec, std::string name = nullptr);
         void copyFromNdarray_Vec3(ftk::ndarray_group* g, std::string xValue, std::string yValue, std::string zValue, std::vector<vec3>& vec, std::string name = nullptr);

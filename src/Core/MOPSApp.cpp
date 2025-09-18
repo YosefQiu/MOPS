@@ -25,30 +25,48 @@ namespace MOPS
     void MOPSApp::addGrid(std::shared_ptr<MPASOGrid> grid)
     {
 		mpasoGrid = std::move(grid);
-		mpasoGrid->createKDTree((mpasoGrid->mDataDir + "/" + "KDTree.bin").c_str(), mSYCLQueue);
-		mDataDir = mpasoGrid->mDataDir;
+		mpasoGrid->createKDTree((mpasoGrid->mCachedDataDir + "/" + "KDTree.bin").c_str(), mSYCLQueue);
+		mDataDir = mpasoGrid->mCachedDataDir;
 		std::cout << " [\u2713]finished loading grid information" << std::endl;
     }
 
     void MOPSApp::addSol(int timestep, std::shared_ptr<MPASOSolution> sol)
     {
+		// check if timestep already exists
+		auto iter = mpasoAttributeMap.find(timestep);
+		if (iter != mpasoAttributeMap.end())
+		{
+			return;
+		}
+
 		std::shared_ptr<MPASOSolution> mpasoSol; 
 		mpasoSol = sol;
+		mpasoSol->setTimestep(timestep);
 
 		mpasoSol->mCellsSize = mpasoGrid->mCellsSize;
 		mpasoSol->mEdgesSize = mpasoGrid->mEdgesSize;
 		mpasoSol->mMaxEdgesSize = mpasoGrid->mMaxEdgesSize;
 		mpasoSol->mVertexSize = mpasoGrid->mVertexSize;
+		
 		mpasoGrid->mVertLevels = mpasoSol->mVertLevels;
 		mpasoGrid->mVertLevelsP1 = mpasoSol->mVertLevelsP1;
 
-		mpasoSol->calcCellCenterZtop();
-		std::cout << " [ Run calcCellVertexZtop" << " ]\n";
-		mpasoSol->calcCellVertexZtop(mpasoGrid.get(), mDataDir, mSYCLQueue);
-		std::cout << " [ Run calcCellCenterVelocity" << " ]\n";
-		mpasoSol->calcCellCenterVelocityByZM(mpasoGrid.get(), mDataDir, mSYCLQueue);
-		std::cout << " [ Run calcCellVertexVelocity" << " ]\n";
-		mpasoSol->calcCellVertexVelocity(mpasoGrid.get(), mDataDir, mSYCLQueue);
+		if (mpasoSol->cellVertexZTop_vec.size() == 0)
+		{
+			std::cout << " [ Run calcCellCenterZtop" << " ]\n";
+			mpasoSol->calcCellCenterZtop();
+			std::cout << " [ Run calcCellVertexZtop" << " ]\n";
+			mpasoSol->calcCellVertexZtop(mpasoGrid.get(), mDataDir, mSYCLQueue);
+		}
+		if (mpasoSol->cellVertexZonalVelocity_vec.size() == 0 && mpasoSol->cellVertexMeridionalVelocity_vec.size() == 0
+			&& mpasoSol->cellVertexVelocity_vec.size() == 0)
+		{
+			std::cout << " [ Run calcCellCenterVelocity" << " ]\n";
+			mpasoSol->calcCellCenterVelocityByZM(mpasoGrid.get(), mDataDir, mSYCLQueue);
+			std::cout << " [ Run calcCellVertexVelocity" << " ]\n";
+			mpasoSol->calcCellVertexVelocity(mpasoGrid.get(), mDataDir, mSYCLQueue);
+		}
+		
 
 		for (const auto& [name, vec] : mpasoSol->mDoubleAttributes)
 		{
@@ -68,17 +86,30 @@ namespace MOPS
 		mpasoField->initField(mpasoGrid, mpasoAttributeMap.begin()->second);
     }
 
-    void MOPSApp::activeAttribute(int timestep)
+    void MOPSApp::activeAttribute(int t1, std::optional<int> t2)
     {
 		mpasoField.reset();
-		auto iter = mpasoAttributeMap.find(timestep);
+		mpasoField = std::make_shared<MPASOField>();
+		auto iter = mpasoAttributeMap.find(t1);
 		if (iter == mpasoAttributeMap.end())
 		{
-			std::cout << " [activeAttribute]::Error: timestep [ " << timestep << " ] not found" << std::endl;
+			std::cout << " [activeAttribute]::Error: timestep [ " << t1 << " ] not found" << std::endl;
 			return;
 		}
-		mpasoField = std::make_shared<MPASOField>();
-        mpasoField->initField(mpasoGrid, iter->second);
+        if (t2.has_value())
+        {
+            auto iter2 = mpasoAttributeMap.find(t2.value());
+            if (iter2 == mpasoAttributeMap.end())
+            {
+                std::cout << " [activeAttribute]::Error: timestep [ " << t2.value() << " ] not found" << std::endl;
+                return;
+            }
+            mpasoField->initField(mpasoGrid, iter->second, iter2->second);
+        }
+        else
+        {
+            mpasoField->initField(mpasoGrid, iter->second);
+        }
     }
 
     std::vector<ImageBuffer<double>> MOPSApp::runRemapping(VisualizationSettings* config)
@@ -131,51 +162,14 @@ namespace MOPS
     	std::vector<int> cell_id_vec;
 
 		mpasoField->calcInWhichCells(sample_points, cell_id_vec);
-		// // test
-		// std::vector<CartesianCoord> tmp_pts;
-		// std::vector<int> test_id;
-		// tmp_pts.push_back(sample_points[0]);
-		// tmp_pts.push_back(CartesianCoord{4251170.0822, -3203303.8254, 3500880.7398});
-		// mpasoField->calcInWhichCells(tmp_pts, test_id);
-		// for (auto i = 0; i < test_id.size(); i++)
-		// {
-		// 	std::cout << "[Test Sample Point " << i << "] : (" 
-		// 		<< tmp_pts[i].x() << ", "
-		// 		<< tmp_pts[i].y() << ", "
-		// 		<< tmp_pts[i].z() << ") in cell_id = " << test_id[i] << std::endl;
-		// }
-		// exit(-1);
-
-
-		// int c0 = 82578;    // 上一步 cell
-		// int c1 = 844;      // 你在 host 判到的新 cell
-		// auto P1 = CartesianCoord{4251170.0822, -3203303.8254, 3500880.7398};
-
-		// auto C0 = mpasoField->mGrid->cellCoord_vec[c0];
-		// auto C1 = mpasoField->mGrid->cellCoord_vec[c1];
-
-		// auto d0 = YOSEF_LENGTH(C0 - P1);
-		// auto d1 = YOSEF_LENGTH(C1 - P1);
-		// std::cout << "[CHK] dist to center: c0=" << c0 << " d0=" << d0
-		// 		<< " | c1=" << c1 << " d1=" << d1 << std::endl;
-
-
-		// int cell = 82578;
-		// int maxEdges = 7;
-		// int nCells   = 235160;
-
-		// // A) 按 cell 连续（[nCells][maxEdges]）
-		// std::cout << "[cell-contig] ";
-		// for (int k=0;k<maxEdges;++k){
-		// 	int nid = mpasoField->mGrid->cellsOnCell_vec[cell*maxEdges + k];
-		// 	nid--;
-		// 	std::cout << nid << " ";
-		// }
-		// std::cout << std::endl;
-
-
-		// // exit(-1);
-
+		
+		// test
+		auto test_cell_id = cell_id_vec[0];
+		auto test_cell_surface_vel = mpasoField->mSol_Front->cellCenterVelocity_vec[mpasoField->mSol_Front->mVertLevels * test_cell_id + 0];
+		auto vel_length = YOSEF_LENGTH(test_cell_surface_vel);
+		std::cout << " test_cell_id = " << test_cell_id << " test_cell_surface_vel = " << test_cell_surface_vel.x() 
+			<< " " << test_cell_surface_vel.y() << " " << test_cell_surface_vel.z() << " length = " << vel_length << std::endl;
+		
 		auto lines = MPASOVisualizer::StreamLine(mpasoField.get(), sample_points, config, cell_id_vec, mSYCLQueue);
 		std:: cout << " ==== [\u2713] done..." << std::endl;
 		return lines;

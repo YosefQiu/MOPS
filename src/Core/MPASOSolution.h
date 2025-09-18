@@ -1,5 +1,5 @@
 #pragma once
-#include "Core/MPASOReader.h"
+#include "IO/MPASOReader.h"
 #include "Core/MPASOGrid.h"
 #include "ndarray/ndarray_group_stream.hh"
 namespace MOPS
@@ -11,11 +11,13 @@ namespace MOPS
     public:
         MPASOSolution() = default;
     public:
-        [[deprecated]] void initSolution(MPASOReader* reader);
+        void initSolution(MPASOReader* reader);
         void initSolution(ftk::ndarray_group* g, MPASOReader* reader = nullptr);
         void initSolution_DemoLoading(const char* yaml_path, int timestep);
+        void initSolution_FromBin(const char* prefix);
     public:
-        int mCurrentTime;
+        std::string mCurrentTime;
+        std::string mDataName;
 
         int mCellsSize;
         int mEdgesSize;
@@ -36,8 +38,11 @@ namespace MOPS
         std::vector<double>     cellMeridionalVelocity_vec;
         std::vector<double>	 	cellZonalVelocity_vec;
         std::vector<double>     cellBottomDepth_vec;
+        std::vector<double>     cellSurfaceHeight_vec;
 
         std::vector<double>     cellVertexZTop_vec;
+        std::vector<double>     cellVertexMeridionalVelocity_vec;
+        std::vector<double>	 	cellVertexZonalVelocity_vec;
         std::vector<vec3>       cellCenterVelocity_vec;
         std::vector<vec3>       cellVertexVelocity_vec;
 
@@ -53,6 +58,7 @@ namespace MOPS
 
 
     public:
+        std::string getCurrentTime() const { return mCurrentTime; }
         // ** Deprecated **
         // All get functions are the default data on the CPU side. 
         // When the data is on the GPU side, 
@@ -69,11 +75,10 @@ namespace MOPS
         [[deprecated]] void getCellCenterVelocity(const size_t cell_id, const size_t level, std::vector<vec3>& cell_on_velocity, vec3& vel);
         [[deprecated]] void getCellVertexVelocity(const size_t vertex_id, const size_t level, std::vector<vec3>& cell_vertex_velocity, vec3& vel);
     public:
-        void setTimeStep(int timestep);
         void setAttribute(GridAttributeType type, int val);
         void setAttributesVec3(AttributeType type, const std::vector<vec3>& vec);
         void setAttributesDouble(AttributeType type, const std::vector<double>& vec);
-
+        void setTimestep(int timestep) { mTimesteps = timestep; }
         bool checkAttribute();
 
         void addAttribute(std::string name, AttributeFormat type);
@@ -83,7 +88,12 @@ namespace MOPS
         void calcCellCenterVelocity(MPASOGrid* grid, std::string& dataDir, sycl::queue& q);
         void calcCellCenterVelocityByZM(MPASOGrid* grid, std::string& dataDir, sycl::queue& q);
         void calcCellVertexVelocity(MPASOGrid* grid, std::string& dataDir, sycl::queue& q);
+        void calcCellVertexVelocityByZM(MPASOGrid* grid, std::string& dataDir, sycl::queue& q);
     private:
+        void readFromBlock_Vec3(const std::string& filename, std::vector<vec3>& vec);    
+        void readFromBlock_Double(const std::string& filename, std::vector<double>& vec);
+        void readFromBlock_DoubleBasedK(const std::string& filename, std::vector<double>& vec, int K = -1);
+
         std::shared_ptr<ftk::ndarray_group> gt;
         void copyFromNdarray_Double(ftk::ndarray_group* g, std::string value, std::vector<double>& vec);
         void copyFromNdarray_Char(ftk::ndarray_group* g, std::string value, std::vector<char>& vec);

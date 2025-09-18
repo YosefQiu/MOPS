@@ -42,9 +42,9 @@ namespace MOPS
         app.addField();
     }
 
-    void MOPS_ActiveAttribute(int timestep)
+    void MOPS_ActiveAttribute(int t1, std::optional<int> t2)
     {
-        app.activeAttribute(timestep);
+        app.activeAttribute(t1, t2);
     }
 
     std::vector<ImageBuffer<double>> MOPS_RunRemapping(VisualizationSettings* config)

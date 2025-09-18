@@ -16,26 +16,54 @@ void MPASOSolution::initSolution_DemoLoading(const char* yaml_path, int timestep
 
 }
 
-[[deprecated]]
+void MPASOSolution::initSolution_FromBin(const char* prefix)
+{
+  
+
+
+
+    readFromBlock_Vec3(std::string(prefix) + "Horizontal_vector.bin", cellVertexVelocity_vec);
+    readFromBlock_DoubleBasedK(std::string(prefix) + "ZTop.bin", cellVertexZTop_vec);
+    readFromBlock_DoubleBasedK(std::string(prefix) + "LayerThickness.bin", cellLayerThickness_vec);
+    
+
+    std::cout << "cellVertexZTop_vec size " << cellVertexZTop_vec.size() << std::endl;
+    std::cout << "cellVertexVelocity_vec size " << cellVertexVelocity_vec.size() << std::endl;
+    std::cout << "cellVertexMeridionalVelocity_vec size " << cellVertexMeridionalVelocity_vec.size() << std::endl;
+
+}
+
+
 void MPASOSolution::initSolution(MPASOReader* reader)
 {
-    this->mCurrentTime = std::move(reader->currentTimestep);
-    this->mCellsSize = reader->mCellsSize;
-    this->mEdgesSize = reader->mEdgesSize;
-    this->mMaxEdgesSize = reader->mMaxEdgesSize;
-    this->mVertexSize = reader->mVertexSize;
-    this->mTimesteps = reader->mTimesteps;
-    this->mVertLevels = reader->mVertLevels;
-    this->mVertLevelsP1 = reader->mVertLevelsP1;
+    
+    this->mCurrentTime = std::move(reader->mCurrentTime);
+    this->mVertLevels = std::move(reader->mVertLevels);
+    this->mVertLevelsP1 = std::move(reader->mVertLevelsP1);
+    this->mTimesteps = std::move(reader->mTimesteps);
+    this->mDataName = std::move(reader->mDataName);
 
-    this->cellVelocity_vec = std::move(reader->cellVelocity_vec);
+    this->gt = std::move(reader->mGroupT);
+    
+    this->cellBottomDepth_vec = std::move(reader->cellBottomDepth_vec);
+    this->cellSurfaceHeight_vec = std::move(reader->cellSurfaceHeight_vec);
+    this->cellZonalVelocity_vec = std::move(reader->cellZonalVelocity_vec);
+    this->cellMeridionalVelocity_vec = std::move(reader->cellMeridionalVelocity_vec);
     this->cellLayerThickness_vec = std::move(reader->cellLayerThickness_vec);
     this->cellZTop_vec = std::move(reader->cellZTop_vec);
-    this->cellVertVelocity_vec = std::move(reader->cellVertVelocity_vec);
     this->cellNormalVelocity_vec = std::move(reader->cellNormalVelocity_vec);
-    this->cellMeridionalVelocity_vec = std::move(reader->cellMeridionalVelocity_vec);
-    this->cellZonalVelocity_vec = std::move(reader->cellZonalVelocity_vec);
-    this->cellBottomDepth_vec = std::move(reader->cellBottomDepth_vec);
+
+
+    // std::cout << "mCurrentTime = " << this->mCurrentTime << std::endl;
+    // std::cout << "mVertLevels = " << this->mVertLevels << std::endl;
+    // std::cout << "mVertLevelsP1 = " << this->mVertLevelsP1 << std::endl;
+    // std::cout << "cellBottomDepth_vec size = " << this->cellBottomDepth_vec.size() << std::endl;
+    // std::cout << "cellSurfaceHeight_vec size = " << this->cellSurfaceHeight_vec.size() << std::endl;    
+    // std::cout << "cellZonalVelocity_vec size = " << this->cellZonalVelocity_vec.size() << std::endl;
+    // std::cout << "cellMeridionalVelocity_vec size = " << this->cellMeridionalVelocity_vec.size() << std::endl;
+    // std::cout << "cellLayerThickness_vec size = " << this->cellLayerThickness_vec.size() << std::endl;
+    // std::cout << "cellZTop_vec size = " << this->cellZTop_vec.size() << std::endl;
+    // std::cout << "cellNormalVelocity_vec size = " << this->cellNormalVelocity_vec.size() << std::endl;
 
 }
 
@@ -43,7 +71,7 @@ void MPASOSolution::initSolution(ftk::ndarray_group* g, MPASOReader* reader)
 {
     std::cout << "==========================================\n";
     
-    this->mCurrentTime = std::move(reader->currentTimestep);
+    // this->mCurrentTime = std::move(reader->currentTimestep);
     this->mCellsSize = reader->mCellsSize;
     this->mEdgesSize = reader->mEdgesSize;
     this->mMaxEdgesSize = reader->mMaxEdgesSize;
@@ -52,10 +80,12 @@ void MPASOSolution::initSolution(ftk::ndarray_group* g, MPASOReader* reader)
     this->mVertLevels = reader->mVertLevels;
     this->mVertLevelsP1 = reader->mVertLevelsP1;
 
+    this->gt = std::move(reader->mGroupT);
+
     std::vector<char> time_vec_s;
     std::vector<char> time_vec_e;
    
-    std::cout << "          [ timestep = " << this->mCurrentTime << " ]\n";
+    std::cout << "          [ timestep = " << this->mTimesteps << " ]\n";
     copyFromNdarray_Double(g, "bottomDepth", this->cellBottomDepth_vec);
     copyFromNdarray_Double(g, "velocityZonal", this->cellZonalVelocity_vec);
     copyFromNdarray_Double(g, "velocityMeridional", this->cellMeridionalVelocity_vec);
@@ -98,7 +128,7 @@ void MPASOSolution::addAttribute(std::string name, AttributeFormat type)
 {
     if (this->gt == nullptr)
     {
-        std::cout << "gt is not initialized" << std::endl;
+        std::cerr << "[MPASOSolution]]::Error: gt is not initialized" << std::endl;
         return;
     }
 
@@ -248,7 +278,7 @@ void MPASOSolution::getCellVertexVelocity(const size_t vertex_id, const size_t l
 
 void MPASOSolution::calcCellCenterZtop()
 {
-    Debug(("[MPASOSolution]::Calc Cell Center Z Top at t = " + std::to_string(mCurrentTime)).c_str());
+    Debug(("[MPASOSolution]::Calc Cell Center Z Top at t = " + std::to_string(mTimesteps)).c_str());
 
     // 1. 判断是否有layerThickness
     if (cellLayerThickness_vec.empty())
@@ -259,18 +289,21 @@ void MPASOSolution::calcCellCenterZtop()
 
     // 2. 计算ZTop
     auto nCellsSize = mCellsSize;
-    //auto nVertLevelsP1      =  mVertLevelsP1;
+    auto nVertLevelsP1      =  mVertLevelsP1;
     auto nVertLevels = mVertLevels;
-    auto nTimesteps = mCurrentTime;
+    auto nTimesteps = mTimesteps;
 
     // std::cout << "=======\n";
     // std::cout << "nCellsSize = " << nCellsSize << std::endl;
-    //std::cout << "nVertLevelsP1 = " << nVertLevelsP1 << std::endl;
+    // std::cout << "nVertLevelsP1 = " << nVertLevelsP1 << std::endl;
     // std::cout << "nVertLevels = " << nVertLevels << std::endl;
     // std::cout << "nTimesteps = " << nTimesteps << std::endl;
 
     bool hasBottomDepth = !cellBottomDepth_vec.empty();
+    bool hasSurfaceHeight = !cellSurfaceHeight_vec.empty();
 
+    if (hasBottomDepth && hasSurfaceHeight)
+        hasSurfaceHeight = false;                   // use bottom depth only    
 
     if (!cellZTop_vec.empty()) cellZTop_vec.clear();
     cellZTop_vec.resize(nCellsSize * nVertLevels);
@@ -279,15 +312,7 @@ void MPASOSolution::calcCellCenterZtop()
     {
         if (hasBottomDepth)
         {
-           // 使用物理正确的 zTop 计算方式（从 bottomDepth 反向累加）
-            // double acc = 0.0;
-            // for (int k = nVertLevels - 1; k >= 0; --k)
-            // {
-            //     double layerThickness;
-            //     getCellLayerThickness(i, k, cellLayerThickness_vec, layerThickness);
-            //     acc += layerThickness;
-            //     cellZTop_vec[i * nVertLevels + k] = cellBottomDepth_vec[i] - acc;
-            // }
+            // Calculate from bottom to top
             double z = -cellBottomDepth_vec[i];
             for (int k = nVertLevels - 1; k >= 0; --k) {
                 double layerThickness;
@@ -296,9 +321,22 @@ void MPASOSolution::calcCellCenterZtop()
                 cellZTop_vec[i * nVertLevels + k] = z;
             }
         }
+        else if (hasSurfaceHeight)
+        {
+            // Calculate from top to bottom
+            double z = cellSurfaceHeight_vec[i];
+            cellZTop_vec[i * nVertLevels] = z; 
+            for (size_t j = 1; j < nVertLevels; ++j)
+            {
+                double layerThickness;
+                getCellLayerThickness(i, j - 1, cellLayerThickness_vec, layerThickness);
+                z -= layerThickness;
+                cellZTop_vec[i * nVertLevels + j] = z;
+            }
+        }
         else
         {
-           // 初始化最顶层
+            // Assume surface height is 0
             cellZTop_vec[i * nVertLevels] = 0.0;
             for (size_t j = 1; j < nVertLevels; ++j)
             {
@@ -430,7 +468,7 @@ void MPASOSolution::calcCellVertexZtop(MPASOGrid* grid, std::string& dataDir, sy
     if (!cellVertexZTop_vec.empty()) cellVertexZTop_vec.clear();
     cellVertexZTop_vec.resize(grid->vertexCoord_vec.size() * mTotalZTopLayer);
 
-    auto cell_vertex_ztop_path = dataDir + "/" + "cellVertexZTop_vec_"  + std::to_string(mCurrentTime) + ".bin";
+    auto cell_vertex_ztop_path = dataDir + "/" + "cellVertexZTop_vec_"  + std::to_string(mTimesteps) + ".bin";
 
     if (std::filesystem::exists(cell_vertex_ztop_path)) {
         readVertexZTopFromFile<double>(cellVertexZTop_vec, cell_vertex_ztop_path);
@@ -586,7 +624,7 @@ void MPASOSolution::calcCellCenterToVertex(const std::string& name, const std::v
     std::vector<double> attr_CtoV_vec;
     attr_CtoV_vec.resize(grid->vertexCoord_vec.size() * mTotalZTopLayer);
 
-    auto cell_vertex_attribute_path = dataDir + "/" + "cellVertex" + name + "_vec_"  + std::to_string(mCurrentTime) + ".bin";
+    auto cell_vertex_attribute_path = dataDir + "/" + "cellVertex" + name + "_vec_"  + std::to_string(mTimesteps) + ".bin";
 
     if (std::filesystem::exists(cell_vertex_attribute_path)) {
         readVertexZTopFromFile<double>(attr_CtoV_vec, cell_vertex_attribute_path);
@@ -727,15 +765,14 @@ void MPASOSolution::calcCellCenterToVertex(const std::string& name, const std::v
 
 
 
-//TODO: Temporarily unavailable, it will be released later.
-[[deprecated]] 
+
 void MPASOSolution::calcCellCenterVelocity(MPASOGrid* grid, std::string& dataDir, sycl::queue& q)
 {
 
     if (!cellCenterVelocity_vec.empty()) cellCenterVelocity_vec.clear();
     cellCenterVelocity_vec.resize(grid->mCellsSize * mTotalZTopLayer);
 
-    auto cell_center_velocity_path = dataDir + "/" + "cellCenterVelocity_vec_" + std::to_string(mCurrentTime) + ".bin";
+    auto cell_center_velocity_path = dataDir + "/" + "cellCenterVelocity_vec_" + std::to_string(mTimesteps) + ".bin";
 
     if (std::filesystem::exists(cell_center_velocity_path)) {
         readVertexZTopFromFile<vec3>(cellCenterVelocity_vec, cell_center_velocity_path);
@@ -762,13 +799,13 @@ void MPASOSolution::calcCellCenterVelocity(MPASOGrid* grid, std::string& dataDir
     sycl::buffer<vec3, 1> cellCoord_buf(grid->cellCoord_vec.data(), sycl::range<1>(grid->cellCoord_vec.size()));       // CELL 中心坐标
     sycl::buffer<vec3, 1> edgeCoord_buf(grid->edgeCoord_vec.data(), sycl::range<1>(grid->edgeCoord_vec.size()));       // EDGE 中心坐标
 
-    sycl::buffer<size_t, 1> numberVertexOnCell_buf(grid->numberVertexOnCell_vec.data(), sycl::range<1>(grid->numberVertexOnCell_vec.size())); // CELL 有几个顶点
-    sycl::buffer<size_t, 1> edgesOnCell_buf(grid->edgesOnCell_vec.data(), sycl::range<1>(grid->edgesOnCell_vec.size()));                       // CELL 边ID
-    sycl::buffer<size_t, 1> cellsOnEdge_buf(grid->cellsOnEdge_vec.data(), sycl::range<1>(grid->cellsOnEdge_vec.size()));                       // EDGE 细胞ID
+    sycl::buffer<size_t, 1> numberVertexOnCell_buf(grid->numberVertexOnCell_vec.data(), sycl::range<1>(grid->numberVertexOnCell_vec.size()));   // CELL 有几个顶点
+    sycl::buffer<size_t, 1> edgesOnCell_buf(grid->edgesOnCell_vec.data(), sycl::range<1>(grid->edgesOnCell_vec.size()));                        // CELL 边ID
+    sycl::buffer<size_t, 1> cellsOnEdge_buf(grid->cellsOnEdge_vec.data(), sycl::range<1>(grid->cellsOnEdge_vec.size()));                        // EDGE CELLID
     sycl::buffer<size_t, 1> verticesOnEdge_buf(grid->verticesOnEdge_vec.data(), sycl::range<1>(grid->verticesOnEdge_vec.size()));               // EDGE 顶点ID
 
-    sycl::buffer<double, 1> cellNormalVelocity_buf(cellNormalVelocity_vec.data(), sycl::range<1>(cellNormalVelocity_vec.size()));             // EDGE 正常速度
-    sycl::buffer<vec3, 1> cellCenterVelocity_buf(cellCenterVelocity_vec.data(), sycl::range<1>(cellCenterVelocity_vec.size()));        // CELL 中心速度
+    sycl::buffer<double, 1> cellNormalVelocity_buf(cellNormalVelocity_vec.data(), sycl::range<1>(cellNormalVelocity_vec.size()));               // EDGE Normal Velocity
+    sycl::buffer<vec3, 1> cellCenterVelocity_buf(cellCenterVelocity_vec.data(), sycl::range<1>(cellCenterVelocity_vec.size()));                 // CELL Center Velocity
 
     sycl::buffer<size_t, 1> grid_info_buf(grid_info_vec.data(), sycl::range<1>(grid_info_vec.size())); 
 
@@ -816,7 +853,7 @@ void MPASOSolution::calcCellCenterVelocity(MPASOGrid* grid, std::string& dataDir
             {
                 current_cell_edges_id[k] = nan;
             }
-            // =============================== 找到7个边
+            
 
             // 计算出planeBasisVector
             vec3 eZonal; vec3 eMeridional;
@@ -957,7 +994,7 @@ void MPASOSolution::calcCellCenterVelocityByZM(MPASOGrid *grid, std::string& dat
     if (!cellCenterVelocity_vec.empty()) cellCenterVelocity_vec.clear();
     cellCenterVelocity_vec.resize(grid->mCellsSize * mTotalZTopLayer);
 
-    auto cell_center_velocity_path = dataDir + "/" + "cellCenterVelocity_vec_" + std::to_string(mCurrentTime) + ".bin";
+    auto cell_center_velocity_path = dataDir + "/" + "cellCenterVelocity_vec_" + std::to_string(mTimesteps) + ".bin";
 
     if (std::filesystem::exists(cell_center_velocity_path)) {
         readVertexZTopFromFile<vec3>(cellCenterVelocity_vec, cell_center_velocity_path);
@@ -1043,12 +1080,94 @@ void MPASOSolution::calcCellCenterVelocityByZM(MPASOGrid *grid, std::string& dat
 #endif
 }
 
+void MPASOSolution::calcCellVertexVelocityByZM(MPASOGrid *grid, std::string& dataDir, sycl::queue &q)
+{
+    if (!cellVertexVelocity_vec.empty()) cellVertexVelocity_vec.clear();
+    cellVertexVelocity_vec.resize(grid->mVertexSize * mTotalZTopLayer);
+
+    auto cell_vertex_velocity_path = dataDir + "/" + "cellVertexVelocity_vec_" + std::to_string(mTimesteps) + ".bin";
+
+    if (std::filesystem::exists(cell_vertex_velocity_path)) {
+        readVertexZTopFromFile<vec3>(cellVertexVelocity_vec, cell_vertex_velocity_path);
+        return;
+    }
+
+    std::vector<size_t> grid_info_vec;
+    // tbl
+    // 0 : mCellsSize
+    // 1 : mEdgesSize
+    // 2 : mMaxEdgesSize
+    // 3 : mVertexSize
+    // 4 : mVertLevels
+    // 5 : mVertLevelsP1
+    grid_info_vec.push_back(grid->mCellsSize);
+    grid_info_vec.push_back(grid->mEdgesSize);
+    grid_info_vec.push_back(grid->mMaxEdgesSize);
+    grid_info_vec.push_back(grid->mVertexSize);
+    grid_info_vec.push_back(grid->mVertLevels);
+    grid_info_vec.push_back(grid->mVertLevelsP1);
+
+#if USE_SYCL
+    sycl::buffer<vec3, 1> vertexCoord_buf(grid->vertexCoord_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size())); // CELL 顶点坐标
+    sycl::buffer<vec3, 1> cellCoord_buf(grid->cellCoord_vec.data(), sycl::range<1>(grid->cellCoord_vec.size()));       // CELL 中心坐标
+    
+    sycl::buffer<size_t, 1> numberVertexOnCell_buf(grid->numberVertexOnCell_vec.data(), sycl::range<1>(grid->numberVertexOnCell_vec.size())); // CELL 有几个顶点
+    
+    sycl::buffer<double, 1> cellZonalVelocity_buf(cellVertexZonalVelocity_vec.data(), sycl::range<1>(cellVertexZonalVelocity_vec.size()));            
+    sycl::buffer<double, 1> cellMeridionalVelocity_buf(cellVertexMeridionalVelocity_vec.data(), sycl::range<1>(cellVertexMeridionalVelocity_vec.size()));
+    sycl::buffer<vec3, 1> cellVertexVelocity_buf(cellVertexVelocity_vec.data(), sycl::range<1>(cellVertexVelocity_vec.size()));        // CELL 顶点速度
+
+    sycl::buffer<size_t, 1> grid_info_buf(grid_info_vec.data(), sycl::range<1>(grid_info_vec.size())); 
+
+    q.submit([&](sycl::handler& cgh) {
+        auto acc_vertexCoord_buf = vertexCoord_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellCoord_buf = cellCoord_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_numberVertexOnCell_buf = numberVertexOnCell_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellZonalVelocity_buf = cellZonalVelocity_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellMeridionalVelocity_buf = cellMeridionalVelocity_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellVertexVelocity_buf = cellVertexVelocity_buf.get_access<sycl::access::mode::write>(cgh);
+        auto acc_grid_info_buf          = grid_info_buf.get_access<sycl::access::mode::read>(cgh);
+        cgh.parallel_for(sycl::range<2>(mVertexSize, mTotalZTopLayer), [=](sycl::id<2> idx) {
+            
+            size_t j = idx[0];
+            size_t i = idx[1];
+
+            auto vertex_id = j;
+            auto current_layer = i;
+
+            const int VERTEX_SIZE = acc_grid_info_buf[3];
+            const int max_edge = acc_grid_info_buf[2];
+            const int TOTAY_ZTOP_LAYER = acc_grid_info_buf[4];
+            const int VERTLEVELS = acc_grid_info_buf[4];
+            // 1. 根据vertex_id 找到vertex position
+            vec3 vertex_center_velocity = { 0.0, 0.0, 0.0 };
+            vec3 vertex_position = acc_vertexCoord_buf[vertex_id];
+            // 2. 根据(vertex_id , current_layer) -> zonal velocity and meridional velocity
+            double tmp_zonal = acc_cellZonalVelocity_buf[vertex_id * TOTAY_ZTOP_LAYER + current_layer];
+            double tmp_mer = acc_cellMeridionalVelocity_buf[vertex_id * TOTAY_ZTOP_LAYER + current_layer];
+            GeoConverter::convertENUVelocityToXYZ(vertex_position, tmp_zonal, tmp_mer, 0.0, vertex_center_velocity);
+            acc_cellVertexVelocity_buf[vertex_id * TOTAY_ZTOP_LAYER + current_layer] = vertex_center_velocity;
+        });
+    });
+    q.wait_and_throw();
+
+    // auto host_accessor = cellCenterVelocity_buf.get_access<sycl::access::mode::read>();
+    auto host_accessor = cellVertexVelocity_buf.get_host_access(sycl::read_only);
+    auto range = host_accessor.get_range();
+    size_t acc_length = range.size(); 
+
+    writeVertexZTopToFile<vec3>(cellVertexVelocity_vec, cell_vertex_velocity_path);
+    Debug("[MPASOSolution]::Calc Cell VertexVelocity_vec  = \t [ %d ] \t type = [ float64 float64 float64]",
+            cellVertexVelocity_vec.size());
+#endif
+}
+
 void MPASOSolution::calcCellVertexVelocity(MPASOGrid* grid, std::string& dataDir, sycl::queue& q)
 {
     if(!cellVertexVelocity_vec.empty()) cellVertexVelocity_vec.clear();
     cellVertexVelocity_vec.resize(mVertexSize * mTotalZTopLayer);
 
-    auto cell_vertex_velocity_path = dataDir + "/" + "cellVertexVelocity_vec_" + std::to_string(mCurrentTime) + ".bin";
+    auto cell_vertex_velocity_path = dataDir + "/" + "cellVertexVelocity_vec_" + std::to_string(mTimesteps) + ".bin";
 
     if (std::filesystem::exists(cell_vertex_velocity_path)) {
         readVertexZTopFromFile<vec3>(cellVertexVelocity_vec, cell_vertex_velocity_path);
@@ -1186,6 +1305,84 @@ void MPASOSolution::calcCellVertexVelocity(MPASOGrid* grid, std::string& dataDir
 }
 
 
+void MPASOSolution::readFromBlock_Vec3(const std::string& filename, std::vector<vec3>& vec)
+{
+    std::ifstream file(filename, std::ios::binary);
+    if (!file.is_open())
+    {
+        std::cerr << "[MPASOSolution]::Error: Unable to open file " << filename << std::endl;
+        return;
+    }
+
+    vec.clear();
+    int nNodeNum;
+    file.read(reinterpret_cast<char*>(&nNodeNum), sizeof(int));
+    vec.resize(nNodeNum);
+    // VECTOR3 = 24 bytes (double[3])
+    std::vector<double> vectorData(nNodeNum * 3);
+    file.read(reinterpret_cast<char*>(vectorData.data()), nNodeNum * 3 * sizeof(double));
+    for (int i = 0; i < nNodeNum; i++) 
+    {
+        double x = vectorData[i * 3 + 0];
+        double y = vectorData[i * 3 + 1]; 
+        double z = vectorData[i * 3 + 2];
+        vec[i] = vec3{x, y, z};
+    }
+    file.close();
+}
+
+void MPASOSolution::readFromBlock_Double(const std::string& filename, std::vector<double>& vec)
+{
+    std::ifstream file(filename, std::ios::binary);
+    if (!file.is_open())
+    {
+        std::cerr << "[MPASOSolution]::Error: Unable to open file " << filename << std::endl;
+        return;
+    }
+
+    vec.clear();
+    int dataSize;
+    file.read(reinterpret_cast<char*>(&dataSize), sizeof(int));
+    vec.resize(dataSize);
+    for (std::size_t i = 0; i < dataSize; ++i)
+    {
+        double value;
+        file.read(reinterpret_cast<char*>(&value), sizeof(double));
+        vec[i] = value;
+    }
+    file.close();
+    std::cout << "[MPASOSolution]::Info: Loaded " << filename << " with " << vec.size() << " entries." << std::endl;
+}
+
+void MPASOSolution::readFromBlock_DoubleBasedK(const std::string& filename, std::vector<double>& vec, int K)
+{
+    std::ifstream file(filename, std::ios::binary);
+    if (!file.is_open())
+    {
+        std::cerr << "[MPASOSolution]::Error: Unable to open file " << filename << std::endl;
+        return;
+    }
+
+    vec.clear();
+    int dataSize;
+    int k;
+    file.read(reinterpret_cast<char*>(&dataSize), sizeof(int));
+    if (K == -1)
+        file.read(reinterpret_cast<char*>(&k), sizeof(int));
+    else
+        k = K;
+    vec.resize(dataSize * k);
+    for (int i = 0; i < dataSize * k; i++) 
+    {
+        double value;
+        file.read(reinterpret_cast<char*>(&value), sizeof(double));
+        vec[i] = value;
+    }
+    file.close();
+    K = k;
+    std::cout << "[MPASOSolution]::Info: Loaded " << filename << " with " << dataSize << " entries and " << k << " components each." << std::endl;
+}
+
 void MPASOSolution::copyFromNdarray_Double(ftk::ndarray_group* g, std::string value, std::vector<double>& vec)
 {
     if (g->has(value))
@@ -1297,11 +1494,6 @@ void MPASOSolution::copyFromNdarray_Float(ftk::ndarray_group* g, std::string val
 
 }
 
-void MPASOSolution::setTimeStep(int timestep)
-{
-    mCurrentTime = timestep;
-}
-
 void MPASOSolution::setAttribute(GridAttributeType type, int val)
 {
     switch (type)
@@ -1373,18 +1565,19 @@ bool MPASOSolution::checkAttribute()
 {
     // 1. check velocity
     // must have cellCenterVelocity_vec or (cellMeridionalVelocity_vec, cellZonalVelocity_vec), or (cellNormalVelocity_vec)
-    if (cellCenterVelocity_vec.empty() &&
-        !( !cellMeridionalVelocity_vec.empty() && !cellZonalVelocity_vec.empty() ) &&
-        cellNormalVelocity_vec.empty())
-    {
-        std::cerr << "[Error]: Invalid Velocity Attribute" << std::endl;
-        return false;
-    }
+    // if (cellCenterVelocity_vec.empty() &&
+    //     !( !cellMeridionalVelocity_vec.empty() && !cellZonalVelocity_vec.empty() ) &&
+
+    //     cellNormalVelocity_vec.empty())
+    // {
+    //     std::cerr << "[MPASOSolution]::Error: Invalid Velocity Attribute" << std::endl;
+    //     return false;
+    // }
     // 2. check ztop
     // must have cellZTop_vec or (kLayerThickness, kBottomDepth), or kLayerThickness
     if (cellZTop_vec.empty() && cellLayerThickness_vec.empty())
     {
-        std::cerr << "[Error]: Invalid ZTop Attribute" << std::endl;
+        std::cerr << "[MPASOSolution]::Error: Invalid ZTop Attribute" << std::endl;
         return false;
     }
     
