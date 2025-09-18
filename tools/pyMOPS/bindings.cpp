@@ -1,9 +1,11 @@
+#include <cstddef>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
 #include <memory>
 
 #include "api/MOPS.h"
+#include "IO/MPASOReader.h"
 #include "Core/MPASOGrid.h"
 #include "Core/MPASOSolution.h"
 #include "Core/MOPSApp.h"
@@ -41,6 +43,14 @@ PYBIND11_MODULE(pyMOPS, m) {
         .value("kFixedLayer", MOPS::VisualizeType::kFixedLayer)
         .value("kFixedDepth", MOPS::VisualizeType::kFixedDepth);
 
+    py::enum_<MOPS::CalcDirection>(m, "CalcDirection")
+        .value("kForward", MOPS::CalcDirection::kForward)
+        .value("kBackward", MOPS::CalcDirection::kBackward);
+
+    py::enum_<MOPS::CalcMethodType>(m, "CalcMethodType")
+        .value("kRK4", MOPS::CalcMethodType::kRK4)
+        .value("kEuler", MOPS::CalcMethodType::kEuler);
+
     py::enum_<MOPS::SaveType>(m, "SaveType")
         .value("kVTI", MOPS::SaveType::kVTI)
         .value("kNone", MOPS::SaveType::kNone);
@@ -75,9 +85,16 @@ PYBIND11_MODULE(pyMOPS, m) {
         .value("kBottomDepth", MOPS::AttributeType::kBottomDepth);
 
 
-    
+    py::class_<MOPS::MPASOReader, std::shared_ptr<MOPS::MPASOReader>>(m, "MPASOReader")
+        .def(py::init<>())
+        .def_static("readGridData", &MOPS::MPASOReader::readGridData, py::arg("yaml_path"))
+        .def_static("readSolData", &MOPS::MPASOReader::readSolData, py::arg("yaml_path"), py::arg("time_str"), py::arg("time_index") = 0);
+
     py::class_<MOPS::MPASOGrid, std::shared_ptr<MOPS::MPASOGrid>>(m, "MPASOGrid")
         .def(py::init<>())
+        .def("init_from_reader", [](MOPS::MPASOGrid& self, const std::shared_ptr<MOPS::MPASOReader>& reader) {
+            self.initGrid(reader.get());
+        })
         .def("init_from_yaml", &MOPS::MPASOGrid::initGrid_DemoLoading)
         .def("setGridAttribute", &MOPS::MPASOGrid::setGridAttribute)
         .def("setGridAttributesVec3", [](MOPS::MPASOGrid& self, MOPS::GridAttributeType type, py::array_t<double> arr) {
@@ -123,9 +140,12 @@ PYBIND11_MODULE(pyMOPS, m) {
     
     py::class_<MOPS::MPASOSolution, std::shared_ptr<MOPS::MPASOSolution>>(m, "MPASOSolution")
         .def(py::init<>())
+        .def("init_from_reader", [](MOPS::MPASOSolution& self, const std::shared_ptr<MOPS::MPASOReader>& reader) {
+            self.initSolution(reader.get());
+        })
         .def("init_from_yaml", &MOPS::MPASOSolution::initSolution_DemoLoading)
         .def("add_attribute", &MOPS::MPASOSolution::addAttribute)
-        .def("setTimeStep", &MOPS::MPASOSolution::setTimeStep)
+        .def("setTimestep", &MOPS::MPASOSolution::setTimestep)
         .def("setAttribute", &MOPS::MPASOSolution::setAttribute)
         .def("setAttributesVec3", [](MOPS::MPASOSolution& self, MOPS::AttributeType type, py::array_t<double> arr) {
             if (arr.ndim() != 2 || arr.shape(1) != 3)
@@ -146,7 +166,8 @@ PYBIND11_MODULE(pyMOPS, m) {
                 vec.push_back(buf(i));
             }
             self.setAttributesDouble(type, vec);
-        });
+        })
+        .def("getCurrentTime", &MOPS::MPASOSolution::getCurrentTime);
 
     py::class_<MOPS::VisualizationSettings>(m, "VisualizationSettings")
         .def(py::init<>())
@@ -223,6 +244,8 @@ PYBIND11_MODULE(pyMOPS, m) {
         .def_readwrite("deltaT", &MOPS::TrajectorySettings::deltaT)
         .def_readwrite("simulationDuration", &MOPS::TrajectorySettings::simulationDuration)
         .def_readwrite("recordT", &MOPS::TrajectorySettings::recordT)
+        .def_readwrite("directionType", &MOPS::TrajectorySettings::directionType)
+        .def_readwrite("methodType", &MOPS::TrajectorySettings::methodType)
         .def_readwrite("fileName", &MOPS::TrajectorySettings::fileName);
     
     py::class_<CartesianCoord>(m, "CartesianCoord")
@@ -311,5 +334,87 @@ PYBIND11_MODULE(pyMOPS, m) {
             return py_lines;
         },
         "Run streamline simulation");
-}
 
+    m.def("MOPS_RunPathLine", 
+        [](MOPS::TrajectorySettings* config, 
+            py::array_t<double> sample_points_np,
+            const std::vector<int>& timesteps_in) {
+            
+            // check shape
+            if (sample_points_np.ndim() != 2 || sample_points_np.shape(1) != 3) {
+                throw std::runtime_error("Input sample_points must be a (N, 3) numpy array.");
+            }
+            // convert to vector
+            std::vector<CartesianCoord> sample_points_vec;
+            auto r = sample_points_np.unchecked<2>(); 
+            for (ssize_t i = 0; i < r.shape(0); ++i) {
+                sample_points_vec.emplace_back(r(i, 0), r(i, 1), r(i, 2));
+            }
+
+            auto timesteps = timesteps_in;
+
+            auto traj_lines = MOPS::MOPS_RunPathLine(config, sample_points_vec, timesteps);
+
+            py::list out;
+            const double double_NaN = std::numeric_limits<double>::quiet_NaN();
+
+            for (const auto& ln : traj_lines) {
+                const size_t np = ln.points.size();
+                const size_t nv = ln.velocity.size();
+                const size_t nt = ln.temperature.size();
+                const size_t ns = ln.salinity.size();
+
+                // 输出都按 points.size() 对齐
+                py::array_t<double> pts({(py::ssize_t)np, (py::ssize_t)3});
+                py::array_t<double> vel({(py::ssize_t)np, (py::ssize_t)3});
+                py::array_t<double> tem((py::ssize_t)np);
+                py::array_t<double> sal((py::ssize_t)np);
+
+                auto P = pts.mutable_unchecked<2>();
+                auto V = vel.mutable_unchecked<2>();
+                auto T = tem.mutable_unchecked<1>();
+                auto S = sal.mutable_unchecked<1>();
+
+                for (size_t i = 0; i < np; ++i) {
+                    // points
+                    const auto& p = ln.points[i];
+                    P(i,0) = p.x(); P(i,1) = p.y(); P(i,2) = p.z();
+
+                    // velocity
+                    if (i < nv) {
+                        const auto& v = ln.velocity[i];
+                        V(i,0) = v.x(); V(i,1) = v.y(); V(i,2) = v.z();
+                    } else {
+                        V(i,0) = V(i,1) = V(i,2) = double_NaN;
+                    }
+
+                    T(i) = (i < nt ? ln.temperature[i] : double_NaN);
+                    S(i) = (i < ns ? ln.salinity[i]    : double_NaN);
+                }
+
+                py::array_t<double> last_pt({(py::ssize_t)3});
+                {
+                    auto L = last_pt.mutable_unchecked<1>();
+                    L(0) = ln.lastPoint.x();
+                    L(1) = ln.lastPoint.y();
+                    L(2) = ln.lastPoint.z();
+                }
+
+
+                py::dict py_line;
+                py_line["lineID"] = ln.lineID;
+                py_line["points"] = std::move(pts);
+                py_line["velocity"] = std::move(vel);
+                py_line["temperature"] = std::move(tem);
+                py_line["salinity"] = std::move(sal);
+                py_line["lastPoint"] = std::move(last_pt);
+                out.append(py_line);
+            }
+
+            return out;
+        },
+        py::arg("config"),
+        py::arg("sample_points_np"),
+        py::arg("timesteps_in"),
+        "Run pathline simulation");
+}
