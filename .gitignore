@@ -22,3 +22,4 @@ yaml-cpp
 third_lib
 netcdf-c
 build*
+.cache
