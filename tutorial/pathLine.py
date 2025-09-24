@@ -14,12 +14,9 @@ from datetime import datetime
 print("Available API:", dir(pyMOPS))
 print("\n\n")
     
-yaml_path   = "/pscratch/sd/q/qiuyf/MOPS_Tutorial/test.yaml"
-mpasoGrid   = pyMOPS.MPASOGrid()
-solFront    = pyMOPS.MPASOSolution()
-solBack     = pyMOPS.MPASOSolution()
-last_pt     = None
-ONE_MIN     = 60
+
+
+
 
 def xyz_to_latlon(x, y, z):
     r = np.sqrt(x**2 + y**2 + z**2)
@@ -28,36 +25,6 @@ def xyz_to_latlon(x, y, z):
     lon = np.arctan2(y, x) * 180 / np.pi
     return lat, lon
 
-def _build_segments(lons, lats, values=None):
-    """
-    把一条轨迹拆成 line segments；剔除 NaN 和 180° 经线跨越造成的长跳变。
-    如果传入 values (N,)，会返回每段的标量 (N-1,) （两端点取平均）。
-    """
-    lons = np.asarray(lons); lats = np.asarray(lats)
-    ok = ~np.isnan(lons) & ~np.isnan(lats)
-    lons = lons[ok]; lats = lats[ok]
-    if len(lons) < 2:
-        return np.empty((0, 2, 2)), np.empty((0,)) if values is not None else None
-
-    # 处理经线差值（考虑环绕）：把差映射到 [-180, 180]
-    dlon = ((lons[1:] - lons[:-1] + 180.0) % 360.0) - 180.0
-    good = np.abs(dlon) < 170.0  # 阈值可调，避免跨国际日期变更线产生的“拉一条全球长线”
-
-    segs = np.stack([
-        np.column_stack([lons[:-1], lats[:-1]])[good],
-        np.column_stack([lons[1:],  lats[1:]])[good]
-    ], axis=1)
-
-    if values is None:
-        return segs, None
-    values = np.asarray(values)
-    values = values[ok]
-    if len(values) != len(lons):
-        # 长度不一致，直接返回 None（上层会处理）
-        return segs, None
-    vals_seg = 0.5 * (values[:-1] + values[1:])
-    vals_seg = vals_seg[good]
-    return segs, vals_seg
 
 def Vis_PathLines(
     trajectory_lines,
@@ -72,10 +39,33 @@ def Vis_PathLines(
 ):
     """
     trajectory_lines: 
-      - 新格式：来自 MOPS_RunPathLine 的 list[dict]，
-                 dict 至少包含 'points'(N,3)，可选 'velocity'(N,3), 'temperature'(N,), 'salinity'(N,)
-      - 旧格式：list[np.ndarray]，每个 (N,6) [x,y,z,vx,vy,vz]
+      - newFormat MOPS_RunPathLine -> list[dict]
     """
+    
+    def _build_segments(lons, lats, values=None):
+        lons = np.asarray(lons); lats = np.asarray(lats)
+        ok = ~np.isnan(lons) & ~np.isnan(lats)
+        lons = lons[ok]; lats = lats[ok]
+        if len(lons) < 2:
+            return np.empty((0, 2, 2)), np.empty((0,)) if values is not None else None
+
+        dlon = ((lons[1:] - lons[:-1] + 180.0) % 360.0) - 180.0
+        good = np.abs(dlon) < 170.0  
+
+        segs = np.stack([
+            np.column_stack([lons[:-1], lats[:-1]])[good],
+            np.column_stack([lons[1:],  lats[1:]])[good]
+        ], axis=1)
+
+        if values is None:
+            return segs, None
+        values = np.asarray(values)
+        values = values[ok]
+        if len(values) != len(lons):
+            return segs, None
+        vals_seg = 0.5 * (values[:-1] + values[1:])
+        vals_seg = vals_seg[good]
+        return segs, vals_seg
 
     fig = plt.figure(figsize=(12, 6))
     ax = plt.axes(projection=ccrs.PlateCarree())
@@ -95,24 +85,15 @@ def Vis_PathLines(
         pass
 
     all_lats, all_lons = [], []
-    lcs = []  # 收集所有 LineCollection 以统一归一化
+    lcs = []  # Collects all LineCollection for uniform normalization.
     scal_min, scal_max = np.inf, -np.inf
 
     for line in trajectory_lines:
-        # 兼容两种输入
         if isinstance(line, dict):
             P = np.asarray(line["points"])            # (N,3)
             V = np.asarray(line.get("velocity", []))  # (N,3) 或空
             T = np.asarray(line.get("temperature", []))  # (N,) 或空
             S = np.asarray(line.get("salinity", []))     # (N,) 或空
-        else:
-            arr = np.asarray(line)  # (N,6) = [x,y,z,vx,vy,vz]
-            if arr.ndim != 2 or arr.shape[1] not in (3, 6):
-                continue
-            P = arr[:, :3]
-            V = arr[:, 3:6] if arr.shape[1] == 6 else np.empty((0, 3))
-            T = np.empty((0,))
-            S = np.empty((0,))
 
         if P.shape[0] < 2:
             continue
@@ -121,7 +102,6 @@ def Vis_PathLines(
         all_lats.extend(lat[np.isfinite(lat)])
         all_lons.extend(lon[np.isfinite(lon)])
 
-        # 选择着色数据
         values = None
         if color_by is None:
             values = None
@@ -135,7 +115,6 @@ def Vis_PathLines(
             else:
                 values = None
         else:
-            # 未知关键字 → 当作 None
             values = None
 
         segs, vals_seg = _build_segments(lon, lat, values)
@@ -144,13 +123,13 @@ def Vis_PathLines(
             continue
 
         if vals_seg is None:
-            # 无标量时，画白线
+            # When there is no scalar, draw a white line
             lc = LineCollection(segs, linewidths=linewidth, colors="white",
                                 transform=ccrs.PlateCarree())
         else:
             lc = LineCollection(segs, linewidths=linewidth, cmap=cmap,
                                 array=vals_seg, transform=ccrs.PlateCarree())
-            # 更新全局标量范围
+            # Update the global scalar range
             if vals_seg.size:
                 scal_min = min(scal_min, float(np.nanmin(vals_seg)))
                 scal_max = max(scal_max, float(np.nanmax(vals_seg)))
@@ -158,7 +137,7 @@ def Vis_PathLines(
         ax.add_collection(lc)
         lcs.append(lc)
 
-    # 自动设置范围
+    # Automatic setting range
     if region_extent is None and len(all_lats) > 0:
         margin = 2.0
         ax.set_extent([
@@ -166,23 +145,21 @@ def Vis_PathLines(
             float(np.nanmin(all_lats)) - margin, float(np.nanmax(all_lats)) + margin
         ], crs=ccrs.PlateCarree())
 
-    # 统一归一化 & colorbar
+    # Uniform Normalization & colorbar
     if color_by is not None and len(lcs) > 0 and np.isfinite([scal_min, scal_max]).all():
         if vmin is None: vmin = scal_min
         if vmax is None: vmax = scal_max
-        if vmin == vmax:  # 防止常数场导致归一化异常
+        if vmin == vmax:  
             vmin -= 1e-12
             vmax += 1e-12
 
         norm = Normalize(vmin=vmin, vmax=vmax)
         for lc in lcs:
-            # 只有带 array 的集合才需要设置
             if lc.get_array() is not None:
                 lc.set_norm(norm)
                 lc.set_cmap(cmap)
 
         if show_colorbar:
-            # 选一个带 array 的集合作为 colorbar 句柄
             h = next((lc for lc in lcs if lc.get_array() is not None), None)
             if h is not None:
                 cb = plt.colorbar(h, ax=ax, orientation="vertical", pad=0.02, shrink=0.8)
@@ -202,161 +179,250 @@ def Vis_PathLines(
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.show()
 
-
-def month_pairs_forward(sy, sm, ey, em):
+class MOPSPathline:
     """
-    [('00sy-0sm-01','00sy-0sm+1-01'), ... , ('00ey-em-01','00ey-em+1-01')]
-    example: month_pairs_forward(18,1,20,12)
-    [('0018-01-01', '0018-02-01'), ..., ('0020-11-01', '0020-12-01')]
+      1) init(device="gpu")
+      2) set_time(sy, sm, ey, em, direction="forward")
+      3) set_seed(depth, lat_range=(lat_min,lat_max), lon_range=(lon_min,lon_max),
+                  grid=(nx,ny), points=None, first_point=None, follow_last=True)
+      4) run(method="rk4", delta_minutes=1, record_every_minutes=6) -> list[dict]
     """
-    y, m = sy, sm
-    out = []
-    while (y < ey) or (y == ey and m <= em):
-        by, bm = y, m+1
-        if bm == 13:
-            by, bm = y+1, 1
-        if (by > ey) or (by == ey and bm > em):
-            break
-        a = f"{y:04d}-{m:02d}-01"
-        b = f"{by:04d}-{bm:02d}-01"
-        out.append((a, b))
-        y, m = by, bm
-    return out
+    def __init__(self, yaml_path: str):
+        self.yaml_path = yaml_path
+        self.grid = pyMOPS.MPASOGrid()
+        self.pairs = None
+        self.direction = "forward"
+        self._seed_conf = None
+        self._seed_points = None
+        self._first_point = None
+        self._follow_last = True
+        self._depth = None
+        self._last_pt = None  # (3,) np.ndarray
+        self._one_min = 60
 
-def month_pairs_backward(sy, sm, ey, em):
-    """
-    [('00sy-0sm-01','00sy-0sm-1-01'), ... , ('00ey-em-01','00ey-em-1-01')]
-    example: month_pairs_backward(20,12,18,1)
-    [('0020-12-01', '0020-11-01'), ..., ('0018-02-01', '0018-01-01')]
-    """
-    y, m = sy, sm
-    out = []
-    while (y > ey) or (y == ey and m >= em):
-        by, bm = y, m-1
-        if bm == 0:
-            by, bm = y-1, 1
-            
-            bm = 12
-        if (by < ey) or (by == ey and bm < em):
-            break
-        a = f"{y:04d}-{m:02d}-01"
-        b = f"{by:04d}-{bm:02d}-01"
-        out.append((a, b))
-        y, m = by, bm
-    return out
+        # solutions（复用，减少反复分配）
+        self._solA = pyMOPS.MPASOSolution()
+        self._solB = pyMOPS.MPASOSolution()
 
-def to_int_ymd(s):  # "0018-01-01" -> 180101
-    y, mo, d = s.split("-")
-    return int(y)*10000 + int(mo)*100 + int(d)
+    @staticmethod
+    def _month_pairs_forward(sy, sm, ey, em):
+        """
+        [('00sy-0sm-01','00sy-0sm+1-01'), ... , ('00ey-em-01','00ey-em+1-01')]
+        example: month_pairs_forward(18,1,20,12)
+        [('0018-01-01', '0018-02-01'), ..., ('0020-11-01', '0020-12-01')]
+        """
+        y, m = sy, sm
+        out = []
+        while (y < ey) or (y == ey and m <= em):
+            by, bm = y, m+1
+            if bm == 13:
+                by, bm = y+1, 1
+            if (by > ey) or (by == ey and bm > em):
+                break
+            a = f"{y:04d}-{m:02d}-01"
+            b = f"{by:04d}-{bm:02d}-01"
+            out.append((a, b))
+            y, m = by, bm
+        return out
+    @staticmethod
+    def _month_pairs_backward(sy, sm, ey, em):
+        """
+        [('00sy-0sm-01','00sy-0sm-1-01'), ... , ('00ey-em-01','00ey-em-1-01')]
+        example: month_pairs_backward(20,12,18,1)
+        [('0020-12-01', '0020-11-01'), ..., ('0018-02-01', '0018-01-01')]
+        """
+        y, m = sy, sm
+        out = []
+        while (y > ey) or (y == ey and m >= em):
+            by, bm = y, m-1
+            if bm == 0:
+                by, bm = y-1, 1
+                
+                bm = 12
+            if (by < ey) or (by == ey and bm < em):
+                break
+            a = f"{y:04d}-{m:02d}-01"
+            b = f"{by:04d}-{bm:02d}-01"
+            out.append((a, b))
+            y, m = by, bm
+        return out
+    @staticmethod
+    def _to_int_ymd(s):  # "0018-01-01" -> 180101
+        y, mo, d = s.split("-")
+        return int(y)*10000 + int(mo)*100 + int(d)
+    @staticmethod
+    def _time_gap_seconds(t1: str, t2: str, fmt: str = "%Y-%m-%d_%H:%M:%S") -> int:
+        t1 = t1.split("\x00", 1)[0].strip()
+        t2 = t2.split("\x00", 1)[0].strip()
 
-def time_gap_seconds(t1: str, t2: str, fmt: str = "%Y-%m-%d_%H:%M:%S") -> int:
-    t1 = t1.split("\x00", 1)[0].strip()
-    t2 = t2.split("\x00", 1)[0].strip()
+        dt1 = datetime.strptime(t1, fmt)
+        dt2 = datetime.strptime(t2, fmt)
+        return int((dt1 - dt2).total_seconds())
 
-    dt1 = datetime.strptime(t1, fmt)
-    dt2 = datetime.strptime(t2, fmt)
-    return int((dt1 - dt2).total_seconds())
+    # ① init
+    def init(self, device: str = "gpu"):
+        pyMOPS.MOPS_Init(device)
+        # loading grid
+        self.grid.init_from_reader(pyMOPS.MPASOReader.readGridData(self.yaml_path))
+        return self
 
-def generate_sample_points(depth: float, override_first=True):
-    global last_pt
-    conf = pyMOPS.SeedsSettings()
-    conf.setSeedsRange((2, 2))
-    conf.setGeoBox((35.0, 45.0), (-90.0, -65.0))
-    conf.setDepth(depth)
-    seeds = pyMOPS.MOPS_GenerateSeedsPoints(conf)
+    # ② set time range
+    def set_time(self, sy: int, sm: int, ey: int, em: int, direction: str = "forward"):
+        self.direction = direction.lower()
+        if self.direction == "forward":
+            self.pairs = self._month_pairs_forward(sy, sm, ey, em)
+        elif self.direction == "backward":
+            self.pairs = self._month_pairs_backward(sy, sm, ey, em)
+        else:
+            raise ValueError("direction must be 'forward' or 'backward'")
+        if not self.pairs:
+            raise ValueError("no month pairs produced; check input range")
+        return self
 
-    if override_first:
-        seeds[0] = [1908930.101867, -5174124.236251, 3189701.032088]
-    else:
-        if last_pt is None:
-            raise ValueError("last_pt is None while override_first=False")
-        seeds[0] = last_pt
+    # ③ set seeds
+    def set_seed(
+        self,
+        depth: float,
+        lat_range: tuple = None,
+        lon_range: tuple = None,
+        grid: tuple = (2, 2),
+        points: np.ndarray | list | None = None,   # directly provide (N,3) Cartesian coords
+        first_point: list | tuple | np.ndarray | None = None,
+        follow_last: bool = True
+    ):
+        """
+        Two usages:
+        A) Give lat/lon + grid (internally use MOPS to generate sampling)
+        B) Directly give the Cartesian coordinates of points (N,3)
+        first_point: If given, will override the first seed (e.g. single point tracking)
+        follow_last: If True, the first seed will be replaced by the last point of the previous segment (default True)
+        """
+        self._depth = float(depth)
+        self._first_point = np.array(first_point, float) if first_point is not None else None
+        self._follow_last = bool(follow_last)
 
-    return seeds, conf
+        if points is not None:
+            arr = np.asarray(points, dtype=float)
+            if arr.ndim != 2 or arr.shape[1] != 3:
+                raise ValueError("points must be a (N,3) array")
+            self._seed_points = arr.copy()
+            self._seed_conf = None
+        else:
+            if not (lat_range and lon_range):
+                raise ValueError("when points is None, must provide lat_range & lon_range")
+            nx, ny = grid
+            conf = pyMOPS.SeedsSettings()
+            conf.setSeedsRange((int(nx), int(ny)))
+            conf.setGeoBox(tuple(map(float, lat_range)), tuple(map(float, lon_range)))
+            conf.setDepth(self._depth)
+            self._seed_conf = conf
+            self._seed_points = None
+        return self
 
-def runPathLine(depth: float, isFirst: bool, timeInterval: int, timestep_vec: list):
-    global last_pt  
-    seeds, conf = generate_sample_points(depth, isFirst)
+    # ④ run
+    def run(self, method: str = "rk4", delta_minutes: int = 1, record_every_minutes: int = 6):
+        if self.pairs is None:
+            raise RuntimeError("call set_time(...) before run()")
+        if self._depth is None:
+            raise RuntimeError("call set_seed(...) before run()")
 
-    traj_conf = pyMOPS.TrajectorySettings()
-    traj_conf.depth = conf.getDepth()
-    traj_conf.deltaT = ONE_MIN
-    traj_conf.simulationDuration = timeInterval
-    traj_conf.recordT = ONE_MIN * 6
+        method_flag = pyMOPS.CalcMethodType.kRK4 if method.lower() == "rk4" else pyMOPS.CalcMethodType.kEuler
+        dir_flag = pyMOPS.CalcDirection.kForward if self.direction == "forward" else pyMOPS.CalcDirection.kBackward
 
-    lines = pyMOPS.MOPS_RunPathLine(traj_conf, seeds, timestep_vec)
-    last_pt = np.asarray(lines[0]["lastPoint"], dtype=float)  # (3,)
-    return lines
+        lines_acc = None
+        first = True
+
+        for start, end in self.pairs:
+            # loading attributes
+            if first:
+                self._solA.init_from_reader(pyMOPS.MPASOReader.readSolData(self.yaml_path, start, 0))
+                self._solB.init_from_reader(pyMOPS.MPASOReader.readSolData(self.yaml_path, end,   0))
+            else:
+                # swap
+                self._solA, self._solB = self._solB, self._solA
+                self._solB.init_from_reader(pyMOPS.MPASOReader.readSolData(self.yaml_path, end, 0))
+
+            # loading temperature and salinity attributes
+            for s in (self._solA, self._solB):
+                s.add_attribute("temperature", pyMOPS.AttributeFormat.kFloat)
+                s.add_attribute("salinity",    pyMOPS.AttributeFormat.kFloat)
+
+            # registration
+            pyMOPS.MOPS_Begin()
+            pyMOPS.MOPS_AddGridMesh(self.grid)
+            pyMOPS.MOPS_AddAttribute(self._to_int_ymd(start), self._solA)
+            pyMOPS.MOPS_AddAttribute(self._to_int_ymd(end),   self._solB)
+            pyMOPS.MOPS_End()
+            pyMOPS.MOPS_ActiveAttribute(self._to_int_ymd(start), self._to_int_ymd(end))
+
+            # Calculate time gap
+            gap_sec = abs(self._time_gap_seconds(self._solB.getCurrentTime(), self._solA.getCurrentTime()))
+
+            # Prepare seeds
+            if self._seed_points is not None:
+                seeds = self._seed_points.copy()
+            else:
+                seeds = pyMOPS.MOPS_GenerateSeedsPoints(self._seed_conf)
+
+            # Override first point if needed
+            if first and self._first_point is not None:
+                seeds[0] = self._first_point
+            elif (not first) and self._follow_last and (self._last_pt is not None):
+                seeds[0] = self._last_pt
+
+            # trajectory config
+            cfg = pyMOPS.TrajectorySettings()
+            cfg.depth        = self._depth
+            cfg.deltaT       = int(delta_minutes) * self._one_min
+            cfg.simulationDuration = gap_sec
+            cfg.recordT      = int(record_every_minutes) * self._one_min
+            cfg.directionType= dir_flag
+            cfg.methodType   = method_flag
+
+            # Run a segment
+            seg = pyMOPS.MOPS_RunPathLine(cfg, seeds, [self._to_int_ymd(start), self._to_int_ymd(end)])
+
+            # Update last_pt
+            self._last_pt = np.asarray(seg[0]["lastPoint"], float)
+
+            if lines_acc is None:
+                lines_acc = seg
+            else:
+                for i in range(len(lines_acc)):
+                    P_acc, V_acc = lines_acc[i]["points"],      lines_acc[i]["velocity"]
+                    T_acc, S_acc = lines_acc[i]["temperature"], lines_acc[i]["salinity"]
+                    P_seg, V_seg = seg[i]["points"],            seg[i]["velocity"]
+                    T_seg, S_seg = seg[i]["temperature"],       seg[i]["salinity"]
+
+                    if len(P_seg) > 1:
+                        lines_acc[i]["points"]      = np.vstack([P_acc, P_seg[1:]])
+                        lines_acc[i]["velocity"]    = np.vstack([V_acc, V_seg[1:]])
+                        lines_acc[i]["temperature"] = np.concatenate([T_acc, T_seg[1:]])
+                        lines_acc[i]["salinity"]    = np.concatenate([S_acc, S_seg[1:]])
+
+                    lines_acc[i]["lastPoint"] = seg[i]["lastPoint"]
+
+            first = False
+
+        return lines_acc
 
 
+if __name__ == "__main__":
 
+    yaml_path   = "/pscratch/sd/q/qiuyf/MOPS_Tutorial/test.yaml"
+    mops = MOPSPathline(yaml_path)
 
-pyMOPS.MOPS_Init("gpu")
+    mops.init("gpu")
+    mops.set_time(18, 1, 18, 2, direction="forward")
+    mops.set_seed(
+        depth=10.0,
+        lat_range=(35.0, 45.0),
+        lon_range=(-90.0, -65.0),
+        grid=(2, 2),
+        first_point=[1908930.101867, -5174124.236251, 3189701.032088],  # optional
+    )
+    lines = mops.run(method="rk4", delta_minutes=1, record_every_minutes=6)
 
-pairs = month_pairs_forward(18,1,20,12)
-print("length:", len(pairs))
-
-mpasoGrid.init_from_reader(pyMOPS.MPASOReader.readGridData(yaml_path))
-
-bFirst = True
-depth = 10.0
-lines_acc = None
-for idx, (start, end) in enumerate(pairs, 1):
-    print(f"[{idx}/{len(pairs)}] {start} -> {end}")
+    Vis_PathLines(lines, save_path="white.png")
+    Vis_PathLines(lines, color_by="speed", cmap="turbo", linewidth=1.2, save_path="speed.png")
     
-    if bFirst:
-        solFront.init_from_reader(pyMOPS.MPASOReader.readSolData(yaml_path, start, 0))
-        solBack.init_from_reader(pyMOPS.MPASOReader.readSolData(yaml_path, end, 0))
-    else:
-        solFront, solBack = solBack, solFront
-        solBack.init_from_reader(pyMOPS.MPASOReader.readSolData(yaml_path, end, 0))
-    
-    for s in (solFront, solBack):
-        s.add_attribute("temperature", pyMOPS.AttributeFormat.kFloat)
-        s.add_attribute("salinity", pyMOPS.AttributeFormat.kFloat)
-
-    print("  solFront time:", solFront.getCurrentTime())
-    print("  solBack time:", solBack.getCurrentTime())
-    print("  Time gap (seconds):", time_gap_seconds(solBack.getCurrentTime(), solFront.getCurrentTime()))
-    print()
-    
-    pyMOPS.MOPS_Begin()
-    pyMOPS.MOPS_AddGridMesh(mpasoGrid)
-    pyMOPS.MOPS_AddAttribute(to_int_ymd(start), solFront)
-    pyMOPS.MOPS_AddAttribute(to_int_ymd(end), solBack)
-    pyMOPS.MOPS_End()
-    
-    pyMOPS.MOPS_ActiveAttribute(to_int_ymd(start), to_int_ymd(end))
-    
-    timestep_vec = [to_int_ymd(start), to_int_ymd(end)]
-    
-    lines_seg = runPathLine(depth, bFirst, abs(time_gap_seconds(solBack.getCurrentTime(), solFront.getCurrentTime())), timestep_vec)
-    print("  Pathline length:", len(lines_seg[0]["points"]))
-    bFirst = False
-    
-    if lines_acc is None:
-        lines_acc = lines_seg
-    else:
-        for i in range(len(lines_acc)):
-            P_acc = lines_acc[i]["points"]
-            V_acc = lines_acc[i]["velocity"]
-            T_acc = lines_acc[i]["temperature"]
-            S_acc = lines_acc[i]["salinity"]
-
-            P_seg = lines_seg[i]["points"]
-            V_seg = lines_seg[i]["velocity"]
-            T_seg = lines_seg[i]["temperature"]
-            S_seg = lines_seg[i]["salinity"]
-            if len(P_seg) > 1:
-                lines_acc[i]["points"]      = np.vstack([P_acc, P_seg[1:]])
-                lines_acc[i]["velocity"]    = np.vstack([V_acc, V_seg[1:]])
-                lines_acc[i]["temperature"] = np.concatenate([T_acc, T_seg[1:]])
-                lines_acc[i]["salinity"]    = np.concatenate([S_acc, S_seg[1:]])
-
-            lines_acc[i]["lastPoint"] = lines_seg[i]["lastPoint"]
-
-
-Vis_PathLines(lines_acc, save_path="white.png")
-Vis_PathLines(lines_acc, color_by="speed", cmap="turbo", linewidth=1.2, save_path="speed.png")
-Vis_PathLines(lines_acc, color_by="temperature", cmap="inferno", vmin=0, vmax=30, save_path="temp.png")
-Vis_PathLines(lines_acc, color_by="salinity", region_extent=[-90,-65,35,45], save_path="salinity.png")
