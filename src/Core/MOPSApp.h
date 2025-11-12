@@ -5,6 +5,7 @@
 #include "Core/MPASOField.h"
 #include "SYCL/ImageBuffer.hpp"
 #include "Core/MPASOVisualizer.h"
+#include <memory>
 
 
 
@@ -33,7 +34,7 @@ namespace MOPS
         void addField();
         void activeAttribute(int t1, std::optional<int> t2 = std::nullopt);
         std::vector<TrajectoryLine> runStreamLine(TrajectorySettings* config, std::vector<CartesianCoord>& sample_points);
-        std::vector<TrajectoryLine> runPathLine(TrajectorySettings* config, std::vector<CartesianCoord>& sample_points, std::vector<int>& timestep_vec);
+        std::vector<TrajectoryLine> runPathLine(TrajectorySettings* config, std::vector<CartesianCoord>& sample_points);
         std::vector<ImageBuffer<double>> runRemapping(VisualizationSettings* config);
         void generateSamplePoints(SamplingSettings* config, std::vector<CartesianCoord>& sample_points);
         void generateSamplePointsAtCenter(SamplingSettings* config, std::vector<CartesianCoord>& sample_points);
@@ -41,6 +42,7 @@ namespace MOPS
         MOPSState getState() const { return mState; }
         void setState(MOPSState state) { mState = state; }
         bool checkAttribute() const;
+        std::shared_ptr<MPASOField> getField() const { return mpasoField; }
     private:
         MOPSState mState = MOPSState::Uninitialized;
         std::string mDataDir;

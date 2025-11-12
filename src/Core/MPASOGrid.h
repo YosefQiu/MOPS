@@ -3,6 +3,7 @@
 #include "Utils/KDTree.h"
 #include "Utils/Interpolation.hpp"
 #include "ndarray/ndarray_group_stream.hh"
+#include <vector>
 
 namespace MOPS
 {
@@ -10,7 +11,7 @@ namespace MOPS
     enum class CalcType : int{ kVelocity, kZTOP, kCount };
     enum class GridAttributeType : int{ kCellSize, kEdgeSize, kVertexSize, kMaxEdgesSize, kVertLevels, kVertLevelsP1, 
             kVertexCoord, kCellCoord, kEdgeCoord, kVertexLatLon, kVerticesOnCell, kVerticesOnEdge, kCellsOnVertex, kCellsOnCell, 
-            kNumberVertexOnCell, kCellsOnEdge, kEdgesOnCell, kCellWeight, kCount };
+            kNumberVertexOnCell, kCellsOnEdge, kEdgesOnCell, kCellWeight, krefBottomDepth, kCount };
     inline std::string GridAttributeTypeToString(GridAttributeType type)
     {
         switch (type)
@@ -33,6 +34,7 @@ namespace MOPS
             case GridAttributeType::kCellsOnEdge: return "kCellsOnEdge";
             case GridAttributeType::kEdgesOnCell: return "kEdgesOnCell";
             case GridAttributeType::kCellWeight: return "kCellWeight";
+            case GridAttributeType::krefBottomDepth: return "krefBottomDepth";
             default: return "kCount";
         }
     }
@@ -73,6 +75,8 @@ namespace MOPS
         std::vector<size_t>     cellsOnEdge_vec;
         std::vector<size_t>     edgesOnCell_vec;
         std::vector<float>      cellWeight_vec;
+
+        std::vector<double>     cellRefBottomDepth_vec;
 
     public:
         void initGrid(MPASOReader* reader);

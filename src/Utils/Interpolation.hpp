@@ -180,7 +180,7 @@ namespace MOPS
             // Forward elimination
             for (int j = 0; j < n - 1; ++j) 
             {
-                // 选择主元
+                // Select Primary Element
                 int maxRow = j;
                 for (int i = j + 1; i < n; ++i) 
                 {
@@ -192,7 +192,7 @@ namespace MOPS
                 for (int i = j + 1; i < n; ++i) 
                 {
                     double factor = A[pivot[i]][j] / A[pivot[j]][j];
-                    A[pivot[i]][j] = factor; // 存储消元因子
+                    A[pivot[i]][j] = factor; // Store elimination factor
                     for (int k = j + 1; k < n; ++k) 
                     {
                         A[pivot[i]][k] -= factor * A[pivot[j]][k];
@@ -239,13 +239,13 @@ namespace MOPS
             double coefficients[MAX_EDGE][3]
         )
         {
-            // 先将 3D 源点与单位向量投影到给定平面（2D）
+            // First project the 3D source point and unit vector to a given plane (2D)
             double planarSourcePoints[MAX_EDGE][2] = {0};
             double planarUnitVectors[MAX_EDGE][2] = {0};
             double planarDestinationPoint[2] = {0};
 
             for (int i = 0; i < pointCount; ++i) {
-                // 投影：点在 planeBasisVectors[0] 和 [1] 上的分量
+                // Projection: components of the point on planeBasisVectors[0] and [1]
                 planarSourcePoints[i][0] =
                     sourcePoints[i][0] * planeBasisVectors[0][0] +
                     sourcePoints[i][1] * planeBasisVectors[0][1] +
@@ -271,7 +271,7 @@ namespace MOPS
                     destinationPoint[2] * planeBasisVectors[d][2];
             }
 
-            // 构造 2D 的 RBF 系数矩阵 A 和右端项 rhs（A: [pointCount][pointCount], rhs: [pointCount][2]）
+            // Construct 2D RBF coefficient matrix A and right-hand side rhs (A: [pointCount][pointCount], rhs: [pointCount][2])
             double A[MAX_EDGE][MAX_EDGE] = {0};
             double rhs[MAX_EDGE][2] = {0};
 
@@ -287,7 +287,7 @@ namespace MOPS
                     double dotProduct = planarUnitVectors[i][0] * planarUnitVectors[j][0] +
                                         planarUnitVectors[i][1] * planarUnitVectors[j][1];
                     A[i][j] = rbfValue * dotProduct;
-                    A[j][i] = A[i][j];  // 对称
+                    A[j][i] = A[i][j];  // Symmetric
                 }
                 double rSquaredDest = 0.0;
                 for (int d = 0; d < 2; ++d) {
@@ -300,12 +300,12 @@ namespace MOPS
                 rhs[j][1] = rbfValueDest * planarUnitVectors[j][1];
             }
 
-            // 分别求解两个线性系统：A * x1 = rhs(:,0) 和 A * x2 = rhs(:,1)
+            // Solve two linear systems separately: A * x1 = rhs(:,0) and A * x2 = rhs(:,1)
             double x1[MAX_EDGE] = {0};
             double x2[MAX_EDGE] = {0};
             double A_copy[MAX_EDGE][MAX_EDGE];
 
-            // 复制 A 到 A_copy
+            // Copy A to A_copy
             for (int i = 0; i < pointCount; ++i)
                 for (int j = 0; j < pointCount; ++j)
                     A_copy[i][j] = A[i][j];
@@ -317,7 +317,7 @@ namespace MOPS
                 gauss_elimination_fixed(A_copy, b_col, pointCount, x1);
             }
 
-            // 重新复制 A 到 A_copy
+            // Copy A to A_copy again
             for (int i = 0; i < pointCount; ++i)
                 for (int j = 0; j < pointCount; ++j)
                     A_copy[i][j] = A[i][j];
@@ -329,7 +329,7 @@ namespace MOPS
                 gauss_elimination_fixed(A_copy, b_col, pointCount, x2);
             }
 
-            // 将 2D 解转换为 3D 系数： coefficients[i] = planeBasisVectors[0] * x1[i] + planeBasisVectors[1] * x2[i]
+            // Converts 2D solutions to 3D coefficients: coefficients[i] = planeBasisVectors[0] * x1[i] + planeBasisVectors[1] * x2[i]
             for (int i = 0; i < pointCount; ++i) {
                 for (int d = 0; d < 3; ++d) {
                     coefficients[i][d] = planeBasisVectors[0][d] * x1[i] + planeBasisVectors[1][d] * x2[i];

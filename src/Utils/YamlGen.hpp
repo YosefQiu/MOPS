@@ -139,6 +139,57 @@ stream:
     }
     inline bool operator==(const YMD& a, const YMD& b) { return a.year==b.year && a.month==b.month && a.day==b.day; }
     inline bool operator<=(const YMD& a, const YMD& b) { return (a < b) || (a == b); }
+    inline bool is_leap(int y) {
+        return (y%4==0 && y%100!=0) || (y%400==0);
+    }
+    inline int days_in_month(int y, int m) {
+        static const int mdays[12] = {31,28,31,30,31,30,31,31,30,31,30,31};
+        if (m == 2) return is_leap(y) ? 29 : 28;
+        return mdays[m-1];
+    }
+    inline YMD operator+(const YMD& lhs, const YMD& delta) 
+    {
+        YMD result = lhs;
+        result.year  += delta.year;
+        result.month += delta.month;
+        result.day   += delta.day;
+
+        while (result.month > 12) { result.month -= 12; result.year++; }
+        while (result.month < 1)  { result.month += 12; result.year--; }
+
+        int dim = days_in_month(result.year, result.month);
+        while (result.day > dim) {
+            result.day -= dim;
+            result.month++;
+            if (result.month > 12) { result.month = 1; result.year++; }
+            dim = days_in_month(result.year, result.month);
+        }
+        while (result.day < 1) {
+            result.month--;
+            if (result.month < 1) { result.month = 12; result.year--; }
+            result.day += days_in_month(result.year, result.month);
+        }
+
+        return result;
+    }
+
+    inline YMD fromStringYMD(const std::string& str)
+    {
+        if (str.size() != 6 && str.size() != 8)
+            throw std::invalid_argument("Bad date string format, expect YYMMDD or YYYYMMDD");
+
+        int y, m, d;
+        if (str.size() == 6) {
+            y = std::stoi(str.substr(0, 2));
+            m = std::stoi(str.substr(2, 2));
+            d = std::stoi(str.substr(4, 2));
+        } else {
+            y = std::stoi(str.substr(0, 4));
+            m = std::stoi(str.substr(4, 2));
+            d = std::stoi(str.substr(6, 2));
+        }
+        return MOPS_IO::YMD{y, m, d};
+    }
 
     inline YMD next_month(YMD a)
     {
@@ -297,35 +348,35 @@ stream:
         }
     }
 
-  inline std::string make_date_tag(int year, int month, int day=1) 
-  {
-        std::ostringstream oss;
-        oss << std::setfill('0') << std::setw(4) << year
-            << "-" << std::setw(2) << month
-            << "-" << std::setw(2) << day;
-        return oss.str(); // example: 0015-04-01
-  }
+    inline std::string make_date_tag(int year, int month, int day=1) 
+    {
+            std::ostringstream oss;
+            oss << std::setfill('0') << std::setw(4) << year
+                << "-" << std::setw(2) << month
+                << "-" << std::setw(2) << day;
+            return oss.str(); // example: 0015-04-01
+    }
 
-  inline std::vector<std::pair<std::string, std::string>> make_forward_month_pairs(int start_year, int start_month,
-                          int end_year,   int end_month)
-  {
-        using namespace MOPS_IO;
-        std::vector<std::pair<std::string, std::string>> out;
+    inline std::vector<std::pair<std::string, std::string>> make_forward_month_pairs(int start_year, int start_month,
+                            int end_year,   int end_month)
+    {
+            using namespace MOPS_IO;
+            std::vector<std::pair<std::string, std::string>> out;
 
-        YMD A{start_year, start_month, 1};
-        YMD E{end_year,   end_month,   1};
-        if (!(A <= E)) return out;
+            YMD A{start_year, start_month, 1};
+            YMD E{end_year,   end_month,   1};
+            if (!(A <= E)) return out;
 
-        for (; A <= E; A = next_month(A)) {
-            YMD B = next_month(A);
-            if (!(B <= E)) break;
-            out.emplace_back(
-                make_date_tag(A.year, A.month, A.day),
-                make_date_tag(B.year, B.month, B.day)
-            );
-        }
-        return out;
-  }
+            for (; A <= E; A = next_month(A)) {
+                YMD B = next_month(A);
+                if (!(B <= E)) break;
+                out.emplace_back(
+                    make_date_tag(A.year, A.month, A.day),
+                    make_date_tag(B.year, B.month, B.day)
+                );
+            }
+            return out;
+    }
 
 
     inline std::vector<std::pair<std::string, std::string>> make_backward_month_pairs(int start_year, int start_month,

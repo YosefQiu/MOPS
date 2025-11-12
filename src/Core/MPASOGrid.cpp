@@ -208,6 +208,8 @@ void MPASOGrid::initGrid(MPASOReader* reader)
     this->cellsOnEdge_vec           = std::move(reader->cellsOnEdge_vec);
     this->edgesOnCell_vec           = std::move(reader->edgesOnCell_vec);
 
+    this->cellRefBottomDepth_vec    = std::move(reader->cellRefBottomDepth_vec);
+
     auto cachedFileName = reader->mMeshName;
     this->mMeshName = reader->mMeshName;
 	this->mCachedDataDir = createDataPath(".data", cachedFileName);
@@ -338,7 +340,7 @@ void MPASOGrid::getCellsOnVertex(const size_t vertex_id, std::vector<size_t>& ce
 
 void MPASOGrid::getCellsOnEdge(const size_t edge_id, std::vector<size_t>& cell_on_edge, std::vector<size_t>& cell_id)
 {
-    // 输入一个边的ID，返回这个边上的两个cell的ID
+    // Enter the ID of an edge and return the IDs of the two cells on that edge.
     std::vector<size_t>::const_iterator first = cell_on_edge.begin() + (2 * edge_id + 0);
     std::vector<size_t>::const_iterator last = cell_on_edge.begin() + (2 * edge_id + 2);
     if (!cell_id.empty()) cell_id.clear();
@@ -348,7 +350,7 @@ void MPASOGrid::getCellsOnEdge(const size_t edge_id, std::vector<size_t>& cell_o
 
 void MPASOGrid::getEdgesOnCell(const size_t cell_id, std::vector<size_t>& edge_on_cell, std::vector<size_t>& edge_id)
 {
-    // 输入一个cell的ID，返回这个cell上的所有边的ID
+    // Enter the ID of a cell and return the IDs of all edges on that cell.
     std::vector<size_t>::const_iterator first = edge_on_cell.begin() + (mMaxEdgesSize * cell_id + 0);
     std::vector<size_t>::const_iterator last = edge_on_cell.begin() + (mMaxEdgesSize * cell_id + mMaxEdgesSize);
     if (!edge_id.empty()) edge_id.clear();

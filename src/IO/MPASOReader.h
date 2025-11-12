@@ -2,6 +2,7 @@
 #include "ggl.h"
 #include "Utils/Log.hpp"
 #include "ndarray/ndarray_group_stream.hh"
+#include <vector>
 
 namespace MOPS
 {
@@ -22,7 +23,7 @@ namespace MOPS
         int mVertLevels = 0;
         int mVertLevelsP1 = 0;
 
-		std::string mCurrentTime;
+		std::string mTimeStamp;
 	public:
 		std::string mMeshName;
 		std::string mDataName;
@@ -54,6 +55,7 @@ namespace MOPS
         std::vector<double>     cellMeridionalVelocity_vec;
         std::vector<double>	 	cellZonalVelocity_vec;
         std::vector<double>     cellBottomDepth_vec;
+        std::vector<double>     cellRefBottomDepth_vec;
 
         std::vector<double>     cellVertexZTop_vec;
         std::vector<double>     cellVertexMeridionalVelocity_vec;

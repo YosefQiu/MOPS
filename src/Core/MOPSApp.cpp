@@ -30,10 +30,10 @@ namespace MOPS
 		std::cout << " [\u2713]finished loading grid information" << std::endl;
     }
 
-    void MOPSApp::addSol(int timestep, std::shared_ptr<MPASOSolution> sol)
+    void MOPSApp::addSol(int solID, std::shared_ptr<MPASOSolution> sol)
     {
-		// check if timestep already exists
-		auto iter = mpasoAttributeMap.find(timestep);
+		// check if solID already exists
+		auto iter = mpasoAttributeMap.find(solID);
 		if (iter != mpasoAttributeMap.end())
 		{
 			return;
@@ -41,7 +41,6 @@ namespace MOPS
 
 		std::shared_ptr<MPASOSolution> mpasoSol; 
 		mpasoSol = sol;
-		mpasoSol->setTimestep(timestep);
 
 		mpasoSol->mCellsSize = mpasoGrid->mCellsSize;
 		mpasoSol->mEdgesSize = mpasoGrid->mEdgesSize;
@@ -72,10 +71,10 @@ namespace MOPS
 		{
 			std::cout << " [ Run calcCellCenterToVertex for " << name << " ]\n";
 			mpasoSol->calcCellCenterToVertex(name, vec, mpasoGrid.get(), mDataDir, mSYCLQueue);
-			std::cout << " [\u2713]finished loading sol information at timestep [ " << mpasoSol->mCurrentTime << " ]" << std::endl;
+			std::cout << " [\u2713]finished loading sol information at timestep [ " << mpasoSol->mTimesteps << " ]" << std::endl;
 		}
 
-		mpasoAttributeMap[timestep] = mpasoSol;
+		mpasoAttributeMap[solID] = mpasoSol;
 
 		std::cout << "Total number of attributes: " << mpasoAttributeMap.size() << std::endl;		
     }
@@ -86,22 +85,22 @@ namespace MOPS
 		mpasoField->initField(mpasoGrid, mpasoAttributeMap.begin()->second);
     }
 
-    void MOPSApp::activeAttribute(int t1, std::optional<int> t2)
+    void MOPSApp::activeAttribute(int ID1, std::optional<int> ID2)
     {
 		mpasoField.reset();
 		mpasoField = std::make_shared<MPASOField>();
-		auto iter = mpasoAttributeMap.find(t1);
+		auto iter = mpasoAttributeMap.find(ID1);
 		if (iter == mpasoAttributeMap.end())
 		{
-			std::cout << " [activeAttribute]::Error: timestep [ " << t1 << " ] not found" << std::endl;
+			std::cout << " [activeAttribute]::Error: solID [ " << ID1 << " ] not found" << std::endl;
 			return;
 		}
-        if (t2.has_value())
+        if (ID2.has_value())
         {
-            auto iter2 = mpasoAttributeMap.find(t2.value());
+            auto iter2 = mpasoAttributeMap.find(ID2.value());
             if (iter2 == mpasoAttributeMap.end())
             {
-                std::cout << " [activeAttribute]::Error: timestep [ " << t2.value() << " ] not found" << std::endl;
+                std::cout << " [activeAttribute]::Error: solID [ " << ID2.value() << " ] not found" << std::endl;
                 return;
             }
             mpasoField->initField(mpasoGrid, iter->second, iter2->second);
@@ -175,23 +174,46 @@ namespace MOPS
 		return lines;
 	}
 
-	std::vector<TrajectoryLine> MOPSApp::runPathLine(TrajectorySettings* config, std::vector<CartesianCoord>& sample_points, std::vector<int>& timestep_vec)
+	std::vector<TrajectoryLine> MOPSApp::runPathLine(TrajectorySettings* config, std::vector<CartesianCoord>& sample_points)
 	{
-		// check if the timestep_vec is valid
-		for (auto timestep : timestep_vec)
+		// check if the SolFront and SolBack are set
+		if (mpasoField == nullptr)
 		{
-			if (mpasoAttributeMap.find(timestep) == mpasoAttributeMap.end())
-			{
-				std::cerr << "[Error]: Timestep " << timestep << " not found in attribute map." << std::endl;
-				return {};
-			}
+			std::cerr << "[Error]: mpasoField is nullptr, please activeAttribute first." << std::endl;
+			exit(-1);
+		}
+
+		if (mpasoField->mSol_Front == nullptr || mpasoField->mSol_Back == nullptr)
+		{
+			std::cerr << "[Error]: Sol_Front or Sol_Back is nullptr, please activeAttribute first." << std::endl;
+			exit(-1);
 		}
 
 		std::vector<TrajectoryLine> lines;
+
+
+		auto solFront = mpasoField->mSol_Front;
+		auto solBack = mpasoField->mSol_Back;
+		
+		std::vector<int> cell_id_vec;
+		mpasoField->calcInWhichCells(sample_points, cell_id_vec);
+		
+		auto lines_i = MPASOVisualizer::PathLine(mpasoField.get(), sample_points, config, cell_id_vec, mSYCLQueue);
+		std:: cout << " ==== [\u2713] done... [ " 
+			<< solFront->getTimeStamp() << " to " << solBack->getTimeStamp() << " ]" << std::endl;
+
+		// update sample_points
+		for (auto sample_idx = 0; sample_idx < sample_points.size(); sample_idx++)
+		{
+			sample_points[sample_idx] = lines_i[sample_idx].lastPoint;
+		}
+		lines = lines_i;
+
+/*
 		for (auto idx = 0; idx + 1 < timestep_vec.size(); idx++)
 		{
-			auto solFront = mpasoAttributeMap[timestep_vec[idx]];
-			auto solBack = mpasoAttributeMap[timestep_vec[idx + 1]];
+			auto solFront = mpasoField->mSol_Front;
+			auto solBack = mpasoField->mSol_Back;
 			if (solFront == nullptr || solBack == nullptr)
 			{
 				std::cerr << "[Error]: Solution at timestep " << timestep_vec[idx] << " is nullptr" << std::endl;
@@ -226,7 +248,7 @@ namespace MOPS
 				}
 			}
 		}
-
+*/
 		return lines;
 	}
 
@@ -245,16 +267,16 @@ namespace MOPS
 			return false;
 		}
 
-		for (const auto& [timestep, sol] : mpasoAttributeMap)
+		for (const auto& [id, sol] : mpasoAttributeMap)
 		{
 			if (!sol)
 			{
-				std::cerr << "[Error]: Solution at timestep " << timestep << " is nullptr" << std::endl;
+				std::cerr << "[Error]: Solution at solID " << id << " is nullptr" << std::endl;
 				return false;
 			}
 			if (!sol->checkAttribute())
 			{
-				std::cerr << "[Error]: Attribute check failed at timestep " << timestep << std::endl;
+				std::cerr << "[Error]: Attribute check failed at solID " << id << std::endl;
 				return false;
 			}
 		}

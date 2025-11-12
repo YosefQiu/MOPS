@@ -25,12 +25,12 @@ SYCL_EXTERNAL
 void SYCLKernel::GetCellVerticesIdx(int cell_id, int current_cell_vertices_number, size_t* current_cell_vertices_idx, const int VLA, const int max_edge,
         sycl::accessor<size_t, 1, sycl::access::mode::read> acc_verticesOnCell_buf)
 {
-    // 找出所有候选顶点
+    // Find all candidate vertices
     for (size_t k = 0; k < VLA; ++k)
     {
         current_cell_vertices_idx[k] = acc_verticesOnCell_buf[cell_id * max_edge + k] - 1; // Assuming max_edge is the max number of vertices per cell
     }
-    // 不存在的顶点设置为nan
+    // Set non-existent vertices to nan
     auto nan = std::numeric_limits<size_t>::max();
     for (size_t k = current_cell_vertices_number; k < VLA; ++k)
     {
@@ -88,7 +88,7 @@ SYCL_EXTERNAL
         current_cell_neighbors_idx[k] = nid1 - 1;
     }
 
-    // 把 self 放到最后一个有效位置
+    // Put self at the last valid position
     current_cell_neighbors_idx[copyN] = cell_id;
     for (auto k = copyN + 1; k < VLA; k++)
     {

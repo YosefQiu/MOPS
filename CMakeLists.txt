@@ -3,8 +3,9 @@ project(MOPS VERSION 0.1.0)
 
 option(MOPS_TESTING       "Enable test builds"                    OFF)
 option(MOPS_PYTHON        "Enable Python bindings (tools/pyMOPS)" ON)
-option(MOPS_VTK           "Enable VTK-based visualization and IO" OFF) 
-option(MOPS_MPI           "Enable MPI support"                    ON)
+option(MOPS_TUTORIAL      "Enable MOPS Tutorial examples"         ON)
+option(MOPS_VTK           "Enable VTK-based visualization and IO" ON) 
+option(MOPS_MPI           "Enable MPI support"                    OFF)
 option(MOPS_CLI           "Enable CLI support"                    ON)
 
 set(BUILD_SHARED_LIBS ON)
@@ -144,9 +145,13 @@ if(MOPS_TESTING)
   add_subdirectory(test)
 endif()
 
+if (MOPS_TUTORIAL)
+  add_subdirectory(tutorial)
+endif()
+
 add_library(${PROJECT_NAME}::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
 
-message(STATUS "========== MOPS_Tutorial Configuration Summary ==========")
+message(STATUS "========== MOPS Configuration Summary ==========")
 message(STATUS "Project Name          : ${PROJECT_NAME}")
 message(STATUS "Project Version       : ${PROJECT_VERSION}")
 message(STATUS "Compiler              : ${CMAKE_CXX_COMPILER}")
@@ -157,6 +162,7 @@ message(STATUS "---------------------------------------------------------")
 message(STATUS "ENABLE_VTK            : ${MOPS_VTK}")
 message(STATUS "ENABLE_PYTHON         : ${MOPS_PYTHON}")
 message(STATUS "ENABLE_TESTING        : ${MOPS_TESTING}")
+message(STATUS "ENABLE_TUTORIAL       : ${MOPS_TUTORIAL}")
 message(STATUS "ENABLE_MPI            : ${MOPS_MPI}")
 
 # Dependency status

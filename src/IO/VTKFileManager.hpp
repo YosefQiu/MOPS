@@ -37,14 +37,14 @@ namespace MOPS
 			}
 
 
-			// 创建VTK的ImageData对象
+			// Create ImageData object for VTK.
 			vtkSmartPointer<vtkImageData> imageData = vtkSmartPointer<vtkImageData>::New();
 			imageData->SetDimensions(width, height, 1);
-			imageData->AllocateScalars(VTK_DOUBLE, 3); // 每个点有三个属性（X, Y, Z）
-			imageData->SetOrigin(config->LonRange.x(), config->LatRange.x(), k);  // 设置数据的起始位置
-			imageData->SetSpacing(lonSpacing, latSpacing, k);  // 设置每个像素的物理尺寸
+			imageData->AllocateScalars(VTK_DOUBLE, 3); // Each point has three attributes (X, Y, Z)
+			imageData->SetOrigin(config->LonRange.x(), config->LatRange.x(), k);  // Set the origin of the data
+			imageData->SetSpacing(lonSpacing, latSpacing, k);  // Set the physical size of each pixel
 
-			// 填充数据
+			// Fill data
 			if (!img)
 			{
 				Debug("[ERROR]::SaveVTI:: ImageBuffer is nullptr....."); return;
@@ -67,7 +67,7 @@ namespace MOPS
 				}
 			}
 
-			// 设置writer并保存文件
+			// Set writer and save file
 			vtkSmartPointer<vtkXMLImageDataWriter> writer = vtkSmartPointer<vtkXMLImageDataWriter>::New();
 			writer->SetFileName((outputName + "_" + TypeToStr(config->VisType) + std::to_string(k) + ".vti").c_str());
 			writer->SetInputData(imageData);
@@ -90,7 +90,7 @@ namespace MOPS
 			vtkSmartPointer<vtkImageData> imageData = vtkSmartPointer<vtkImageData>::New();
 			imageData->SetDimensions(width, height, 1);
 			imageData->SetOrigin(config->LonRange.x(), config->LatRange.x(), k);
-			imageData->SetSpacing(lonSpacing, latSpacing, 1.0); // 避免 collapse
+			imageData->SetSpacing(lonSpacing, latSpacing, 1.0); // Avoid collapse
 
 			int total_attr_count = img_list.size() * 3;
 			if (attribute_names.size() < total_attr_count) {
@@ -107,7 +107,7 @@ namespace MOPS
 				arrays[i]->SetNumberOfTuples(width * height);
 			}
 
-			// 填充数据
+			// Fill data
 			for (size_t img_idx = 0; img_idx < img_list.size(); ++img_idx) {
 				const auto& img = img_list[img_idx];
 				for (int i = 0; i < height; ++i) {
@@ -126,7 +126,7 @@ namespace MOPS
 				imageData->GetPointData()->AddArray(array);
 			}
 
-			// 写入文件
+			// Write to file
 			vtkSmartPointer<vtkXMLImageDataWriter> writer = vtkSmartPointer<vtkXMLImageDataWriter>::New();
 			std::string filename = (outputName + "_" + TypeToStr(config->VisType) + std::to_string(k) + ".vti");
 			writer->SetFileName(filename.c_str());
@@ -167,7 +167,7 @@ namespace MOPS
 			bool firstPoint = true;
 			double previousLongitude = 0.0;
 
-			// 遍历每个文件中的点，连接成一条线
+			// Iterate over points in each file and connect them into a line
 			for (int i = 0; i < numFiles; ++i)
 			{
 				vtkPolyData* pd = polyDataList[i];
@@ -203,12 +203,12 @@ namespace MOPS
 				lines->InsertNextCell(line);
 			}
 
-			// 创建一个 PolyData 对象并设置 points 和 lines
+			//Create a PolyData object and set the points and lines.
 			vtkSmartPointer<vtkPolyData> polydata = vtkSmartPointer<vtkPolyData>::New();
 			polydata->SetPoints(new_points);
 			polydata->SetLines(lines);
 
-			// 将 PolyData 写入到文件
+			//Write PolyData to file
 			vtkSmartPointer<vtkXMLPolyDataWriter> writer = vtkSmartPointer<vtkXMLPolyDataWriter>::New();
 			writer->SetFileName((outputName + ".vtp").c_str());
 			writer->SetInputData(polydata);
@@ -231,7 +231,7 @@ namespace MOPS
 			bool firstPoint = true;
 			double previousLongitude = 0.0;
 
-			// 遍历每个文件中的点，连接成一条线
+			//Iterate through the points in each file, connecting them to a line
 			for (int i = 0; i < numFiles; ++i) {
 				vtkPolyData* pd = polyDataList[i];
 				if (pd->GetNumberOfPoints() > 0) {
@@ -265,12 +265,11 @@ namespace MOPS
 				lines->InsertNextCell(line);
 			}
 
-			// 创建一个 PolyData 对象并设置 points 和 lines
+		
 			vtkSmartPointer<vtkPolyData> polydata = vtkSmartPointer<vtkPolyData>::New();
 			polydata->SetPoints(new_points);
 			polydata->SetLines(lines);
 
-			// 将 PolyData 写入到文件
 			vtkSmartPointer<vtkXMLPolyDataWriter> writer = vtkSmartPointer<vtkXMLPolyDataWriter>::New();
 			writer->SetFileName(checkAndModifyExtension(outputFileName, "vtp").c_str());
 			writer->SetInputData(polydata);
@@ -288,7 +287,7 @@ namespace MOPS
 				reader->Update();
 
 				appendFilter->AddInputData(reader->GetOutput());
-				// 删除已读入的文件
+				// Deleting read-in files
 				std::filesystem::remove(fileName);
 			}
 
@@ -353,15 +352,15 @@ namespace MOPS
 					vec3 p_copy = traj.points[idx];
 					GeoConverter::convertXYZToLatLonDegree(p_copy, latlon);
 
-					double longitude = latlon.y();  // 经度
-					double latitude = latlon.x();   // 纬度
+					double longitude = latlon.y();  // longitudes
+					double latitude = latlon.x();   // latitude
 					double altitude = traj.depth;
 
-					// Wraparound检查
+					// Wraparound check
 					if (!firstPoint) {
 						if ((previousLongitude < -170 && longitude > 170) || (previousLongitude > 170 && longitude < -170)) 
 						{
-							// 经度跳变了！需要断开连线，开始一条新的 polyline
+							// Longitude wraparound detected! Need to break the line and start a new polyline
 							all_lines->InsertNextCell(polyline);
 							polyline = vtkSmartPointer<vtkPolyLine>::New();
 						}
@@ -375,7 +374,7 @@ namespace MOPS
 
 					double vx = 0.0, vy = 0.0, vz = 0.0;
 					if (idx < nVel) {
-						vx = traj.velocity[idx].x(); // 如果是 .x 成员，改为 traj.velocity[idx].x
+						vx = traj.velocity[idx].x(); // If it is a .x member, change to traj.velocity[idx].x
 						vy = traj.velocity[idx].y();
 						vz = traj.velocity[idx].z();
 					}
@@ -386,14 +385,14 @@ namespace MOPS
 					firstPoint = false;
 				}
 
-				// 把这条轨迹加进去
+				// Add this trajectory
 				if (polyline->GetNumberOfPoints() > 0) 
 				{
 					all_lines->InsertNextCell(polyline);
 				}
 			}
 
-			// 创建 PolyData
+			// create PolyData
 			vtkSmartPointer<vtkPolyData> polydata = vtkSmartPointer<vtkPolyData>::New();
 			polydata->SetPoints(all_points);
 			polydata->SetLines(all_lines);
@@ -401,7 +400,7 @@ namespace MOPS
 			polydata->GetPointData()->AddArray(salArr);
 			polydata->GetPointData()->AddArray(velMagArr);
 
-			// 写入文件
+			// Write to file
 			vtkSmartPointer<vtkXMLPolyDataWriter> writer = vtkSmartPointer<vtkXMLPolyDataWriter>::New();
 			writer->SetFileName(checkAndModifyExtension(outputFileName, "vtp").c_str());
 			writer->SetInputData(polydata);

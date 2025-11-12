@@ -14,7 +14,7 @@ kdtreegpu::kdtreegpu(int max_node_num, int max_neighbor_num, int query_num, int 
 	kdtree_max_neighbor_num = max_neighbor_num + 1;
 	kdtree_query_num = query_num;
 	kdtree_node_num = max_node_num;
-	// 主机端分配内存
+	// host memory allocation
 	n = sycl::malloc_host<Node>(kdtree_node_num, q_ct1);
 	split = sycl::malloc_host<int>(kdtree_node_num, q_ct1);
 	query_node = (float*)sycl::malloc_host(
@@ -23,8 +23,6 @@ kdtreegpu::kdtreegpu(int max_node_num, int max_neighbor_num, int query_num, int 
 		sizeof(Pair_my) * kdtree_max_neighbor_num * kdtree_query_num,
 		q_ct1);
 
-	// 复制输入点数据到 n 数组
-	//memcpy(n, points, sizeof(Node) * kdtree_node_num);
 	n = new Node[kdtree_node_num];
 	for (auto idx = 0; idx < kdtree_node_num; ++idx)
 	{
@@ -37,7 +35,7 @@ kdtreegpu::kdtreegpu(int max_node_num, int max_neighbor_num, int query_num, int 
 
 }
 
-//建树，采用非递归的形式，比递归的形式快
+
 void kdtreegpu::build()
 {
 
@@ -45,7 +43,7 @@ void kdtreegpu::build()
 
 	temp.first = 0;
 	temp.second = kdtree_node_num - 1;
-	s.push(temp); // s为栈，用来存L, R, 相当于递归的栈
+	s.push(temp); 
 
 	while (!s.empty()) {
 
@@ -85,13 +83,13 @@ void kdtreegpu::build()
 	}
 }
 
-// gpu上并行查询
+
 int kdtreegpu::query_gpu(float* query_points)
 {
 	std::vector<int> res;
 	res.resize(361 * 181);
 
-	// 复制查询点数据到 query_node 数组
+
 	memcpy(query_node, query_points, sizeof(float) * kdtree_dim * kdtree_query_num);
 	auto q_ct1 = q;
 	
@@ -101,7 +99,7 @@ int kdtreegpu::query_gpu(float* query_points)
 	int* q_cur_id_gpu = NULL;
 	int* split_gpu = NULL;
 
-	//gpu上分配内存
+
 	n_gpu = sycl::malloc_device<Node>((kdtree_node_num), q_ct1);
 	query_result_gpu = (Pair_my*)sycl::malloc_device(
 		sizeof(Pair_my) * (kdtree_max_neighbor_num)*kdtree_query_num,
@@ -110,12 +108,11 @@ int kdtreegpu::query_gpu(float* query_points)
 		sizeof(float) * kdtree_dim * kdtree_query_num, q_ct1);
 	q_cur_id_gpu = sycl::malloc_device<int>(kdtree_query_num, q_ct1);
 	split_gpu = sycl::malloc_device<int>(kdtree_node_num, q_ct1);
-	// 把数据从主机端拷贝到设备端
+
 	q_ct1.memcpy((Node*)n_gpu, (Node*)n, sizeof(Node) * (kdtree_node_num));
 	q_ct1.memcpy((int*)split_gpu, (int*)split, sizeof(int) * (kdtree_node_num));
 	q_ct1.memcpy((float*)query_node_gpu, (float*)query_node,
 		sizeof(float) * (kdtree_query_num * kdtree_dim));
-	// 调用kernel函数，并行查询
 
 	sycl::buffer<int, 1> res_buf(res.data(), sycl::range<1>(res.size()));
 
@@ -125,7 +122,7 @@ int kdtreegpu::query_gpu(float* query_points)
 		int kdtree_dim_ct7 = kdtree_dim;
 		int kdtree_node_num_ct8 = kdtree_node_num;
 		sycl::range<2> global_range(181, 361);
-		sycl::range<2> local_range(16, 16);  // 选择一个合理的局部范围
+		sycl::range<2> local_range(16, 16);  
 
 		auto acc_res_buf = res_buf.get_access<sycl::access::mode::read_write>(cgh);
 
@@ -159,15 +156,15 @@ int kdtreegpu::query_gpu(float* query_points)
 				acc_res_buf[global_id] = cell_id;
 			});
 		});
-	//同步，所有的线程执行完
+	//synchronize and wait for the kernel to finish
 	q_ct1.wait_and_throw();
-	//将结果拷贝回主机端
+	// Copy the results back to host
 	q_ct1
 		.memcpy(query_result, query_result_gpu,
 			sizeof(Pair_my) * kdtree_max_neighbor_num *
 			kdtree_query_num)
 		.wait();
-	//释放设备端显存
+	// Free device memory
 	sycl::free(n_gpu, q_ct1);
 	sycl::free(query_result_gpu, q_ct1);
 	sycl::free(split_gpu, q_ct1);
@@ -196,7 +193,7 @@ int kdtreegpu::query_gpu(float* query_points)
 	return n[idx].index;
 }
 
-//cpu上查询一个点
+
 void kdtreegpu::query_one(int left, int right, int id)
 {
 	Stack_my sta[20], temp;
@@ -268,7 +265,6 @@ void kdtreegpu::query_one(int left, int right, int id)
 
 }
 
-// cpu上查询，并验证cpu的查询和gpu的查询结果是否一致
 int kdtreegpu::query_cpu_and_check()
 {
 	int error = 0;
@@ -494,13 +490,13 @@ void query_all_gpu(int query_num, int* split_gpu,
 	int kdtree_dim, int kdtree_node_num, const sycl::nd_item<2>& item_ct1)
 {
 
-	// 获取全局ID
+	
 	int global_id_x = item_ct1.get_global_id(1);
 	int global_id_y = item_ct1.get_global_id(0);
 
-	// 计算全局索引，假设每个工作项对应一个query
+	// Calculate global index, assuming each work item corresponds to a query
 	int i = global_id_y * item_ct1.get_global_range(1) + global_id_x;
-	// 确保索引不超出范围
+	// Ensure the index is within range
 	if (i < query_num) {
 		q_cur_id_gpu[i] = 1;
 		query_one_gpu(0, kdtree_node_num - 1, i,

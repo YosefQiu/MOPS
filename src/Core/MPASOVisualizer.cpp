@@ -61,9 +61,9 @@ void MPASOVisualizer::VisualizeFixedLayer(MPASOField* mpasoF, VisualizationSetti
     sycl::buffer<double, 1> img_buf(img->mPixels.data(), sycl::range<1>(img->mPixels.size()));
 
     sycl::buffer<int, 1> cellID_buf(cell_id_vec.data(), sycl::range<1>(cell_id_vec.size()));
-    sycl::buffer<vec3, 1> vertexCoord_buf(mpasoF->mGrid->vertexCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->vertexCoord_vec.size())); // CELL 顶点坐标
-    sycl::buffer<vec3, 1> cellCoord_buf(mpasoF->mGrid->cellCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->cellCoord_vec.size()));       // CELL 中心坐标
-    sycl::buffer<size_t, 1> numberVertexOnCell_buf(mpasoF->mGrid->numberVertexOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->numberVertexOnCell_vec.size())); // CELL 有几个顶点
+    sycl::buffer<vec3, 1> vertexCoord_buf(mpasoF->mGrid->vertexCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->vertexCoord_vec.size())); // 
+    sycl::buffer<vec3, 1> cellCoord_buf(mpasoF->mGrid->cellCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->cellCoord_vec.size()));       
+    sycl::buffer<size_t, 1> numberVertexOnCell_buf(mpasoF->mGrid->numberVertexOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->numberVertexOnCell_vec.size())); 
     sycl::buffer<size_t, 1> verticesOnCell_buf(mpasoF->mGrid->verticesOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->verticesOnCell_vec.size()));             // 
     sycl::buffer<size_t, 1> cellsOnVertex_buf(mpasoF->mGrid->cellsOnVertex_vec.data(), sycl::range<1>(mpasoF->mGrid->cellsOnVertex_vec.size()));
     sycl::buffer<size_t, 1> grid_info_buf(grid_info_vec.data(), sycl::range<1>(grid_info_vec.size()));
@@ -131,7 +131,7 @@ void MPASOVisualizer::VisualizeFixedLayer(MPASOField* mpasoF, VisualizationSetti
                 int cell_id = acc_cellID_buf[global_id];
 
 
-                // Determine whether it is on the mainland 判断是否在大陆上
+                // Determine whether it is on the mainland Determine whether it is on the mainland
                 // 1.1 Calculate how many vertices are in this cell.
                 auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
                 auto nan = std::numeric_limits<size_t>::max();
@@ -246,9 +246,9 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
         img_bufs.emplace_back(img.mPixels.data(), sycl::range<1>(img.mPixels.size()));
 
     sycl::buffer<int, 1> cellID_buf(cell_id_vec.data(), sycl::range<1>(cell_id_vec.size()));
-    sycl::buffer<vec3, 1> vertexCoord_buf(mpasoF->mGrid->vertexCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->vertexCoord_vec.size())); // CELL 顶点坐标
-    sycl::buffer<vec3, 1> cellCoord_buf(mpasoF->mGrid->cellCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->cellCoord_vec.size()));       // CELL 中心坐标
-    sycl::buffer<size_t, 1> numberVertexOnCell_buf(mpasoF->mGrid->numberVertexOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->numberVertexOnCell_vec.size())); // CELL 有几个顶点
+    sycl::buffer<vec3, 1> vertexCoord_buf(mpasoF->mGrid->vertexCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->vertexCoord_vec.size())); // 
+    sycl::buffer<vec3, 1> cellCoord_buf(mpasoF->mGrid->cellCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->cellCoord_vec.size()));       
+    sycl::buffer<size_t, 1> numberVertexOnCell_buf(mpasoF->mGrid->numberVertexOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->numberVertexOnCell_vec.size())); 
     sycl::buffer<size_t, 1> verticesOnCell_buf(mpasoF->mGrid->verticesOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->verticesOnCell_vec.size()));             // 
     sycl::buffer<size_t, 1> cellsOnVertex_buf(mpasoF->mGrid->cellsOnVertex_vec.data(), sycl::range<1>(mpasoF->mGrid->cellsOnVertex_vec.size()));
     sycl::buffer<size_t, 1> grid_info_buf(grid_info_vec.data(), sycl::range<1>(grid_info_vec.size()));
@@ -373,7 +373,7 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
             GeoConverter::convertRadianLatLonToXYZ(current_latlon_r, current_position);
             int cell_id = acc_cellID_buf[global_id];
 
-            // Determine whether it is on the mainland 判断是否在大陆上
+            // Determine whether it is on the mainland Determine whether it is on the mainland
             // 1.1 Calculate how many vertices are in this cell.
             auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
             // 1.2 Find all candidate vertices
@@ -402,7 +402,7 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
 
             if (!SYCLKernel::GetCellVertexPos(vpos, current_cell_vertices_idx, MAX_VERTEX_NUM,
                                             current_cell_vertices_number, acc_vertexCoord_buf)) {
-                // 取不到顶点，按缺测处理
+                // If the vertex can't be taken, it will be treated as missing.
                 imgValue = vec3_nan;
                 for (int i=0;i<img_count;++i) SetPixel(img_accs[i], width, height, height_index, width_index, imgValue);
                 return;
@@ -411,10 +411,10 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
             // Wachspress
             Interpolator::CalcPolygonWachspress(current_position, vpos, w, current_cell_vertices_number);
 
-            // 每顶点层数（兼容 L 或 L+1）
+            // Number of layers per vertex (compatible with L or L+1)
             const int ztop_levels = (int)(acc_cellVertexZTop_buf.get_range()[0] / ACTUALL_VERTEX_SIZE);
 
-            // 用 ztop_levels 做步幅
+            // Use ztop_levels as the stride
             for (int k = 0; k < ztop_levels; ++k) {
                 double acc = 0.0;
                 for (int v = 0; v < current_cell_vertices_number; ++v) {
@@ -425,28 +425,28 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
                 current_point_ztop_vec[k] = acc;
             }
 
-            // 单调性修正（防微小反跳）
+
             for (int k = 1; k < ztop_levels; ++k) {
                 if (current_point_ztop_vec[k] > current_point_ztop_vec[k-1]) {
                     current_point_ztop_vec[k] = current_point_ztop_vec[k-1] - 1e-9;
                 }
             }
 
-            // 深度包络判断（先做“是否湿”）
+          
             double z_surf = current_point_ztop_vec[0];
             double z_bot  = current_point_ztop_vec[ztop_levels - 1];
             if (z_surf < z_bot) { double t = z_surf; z_surf = z_bot; z_bot = t; }
 
             double epsd = sycl::fmax(1e-6, 1e-8 * sycl::fabs(z_surf - z_bot));
-            // DEPTH 为负（-10）
+            
             if (!(DEPTH <= z_surf + epsd && DEPTH >= z_bot - epsd)) {
-                // 该深度为干：直接写 NaN / 陆地颜色
+              
                 imgValue = vec3_nan;
                 for (int i=0;i<img_count;++i) SetPixel(img_accs[i], width, height, height_index, width_index, imgValue);
                 return;
             }
 
-            // 找包含的界面对 (k-1,k)，允许边界
+           
             int local_layer = -1;
             for (int k = 1; k < ztop_levels; ++k) {
                 double topI = current_point_ztop_vec[k-1];
@@ -460,12 +460,12 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
             }
             if (local_layer < 0) 
             {
-                // 极端情况下兜底（可选）：最近界面对；不想兜底就保持 NaN
+      
                 imgValue = vec3_nan;
                 for (int i=0;i<img_count;++i) SetPixel(img_accs[i], width, height, height_index, width_index, imgValue);
                 return;
             }
-            // 找到 local_layer 后：
+           
             double topI = current_point_ztop_vec[local_layer-1];
             double botI = current_point_ztop_vec[local_layer];
             if (topI < botI) { double tmp = topI; topI = botI; botI = tmp; }
@@ -473,19 +473,18 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
             double denom  = topI - botI; // >0
             double tparam = (denom > 1e-12) ? (DEPTH - botI) / denom : 0.5;
 
-            // 速度层数
             const int vel_levels = (int)(acc_cellVertexVelocity_buf.get_range()[0] / ACTUALL_VERTEX_SIZE);
             int j     = sycl::clamp(local_layer - 1, 0, vel_levels - 1);
             int j_bot = sycl::min(j + 1, vel_levels - 1);
             int j_top = j;
 
-            // 两层中心速度
+            // Two-layer center velocity
             vec3 v_top = SYCLKernel::CalcVelocity(current_cell_vertices_idx, w,
                         MAX_VERTEX_NUM, current_cell_vertices_number, vel_levels, j_top, acc_cellVertexVelocity_buf);
             vec3 v_bot = SYCLKernel::CalcVelocity(current_cell_vertices_idx, w,
                         MAX_VERTEX_NUM, current_cell_vertices_number, vel_levels, j_bot, acc_cellVertexVelocity_buf);
 
-            // 缺测兜底
+           
             double mtop = YOSEF_LENGTH(v_top), mbot = YOSEF_LENGTH(v_bot);
             vec3 final_vel;
             if (mtop < 1e-12 && mbot < 1e-12)      final_vel = vec3{0.0,0.0,0.0};
@@ -499,7 +498,7 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
             double spd = sycl::sqrt(u_east*u_east + v_north*v_north);
             vec3 current_point_velocity_enu = {u_east, v_north, spd};
 
-            // 属性（示例：前两张图用两个 attr）
+           
             vec3 current_point_attr_value = {0.0, 0.0, 0.0};
             if (bDoubleAttributes)
             {
@@ -508,7 +507,7 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
                     const int attr_levels = (int)(acc_attr_bufs[0].get_range()[0] / ACTUALL_VERTEX_SIZE);
                     int aj     = sycl::clamp(local_layer - 1, 0, attr_levels - 1);
                     int aj_bot = sycl::min(aj + 1, attr_levels - 1);
-                    // 简单：取 aj 层；如果要插值，再算 top/bot 后按 tparam 插
+                    
                     double a0 = SYCLKernel::CalcAttribute(current_cell_vertices_idx, w,
                                 MAX_VERTEX_NUM, current_cell_vertices_number, attr_levels, aj, acc_attr_bufs[0]);
                     current_point_attr_value.x() = a0;
@@ -540,11 +539,9 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
 
 
 
-//TODO: Temporarily unavailable, it will be released later.
-[[deprecated]]
 void MPASOVisualizer::VisualizeFixedLatitude(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, sycl::queue& sycl_Q)
 {
-/*
+
     int width = config->imageSize.x();
     int height = config->imageSize.y();
     auto minDepth = config->DepthRange.x();
@@ -553,40 +550,64 @@ void MPASOVisualizer::VisualizeFixedLatitude(MPASOField* mpasoF, VisualizationSe
     auto maxLon = config->LonRange.y();
     auto fixed_lat = config->FixedLatitude;
 
+    const auto& refBottomDepth = mpasoF->mGrid->cellRefBottomDepth_vec;
+
+    minDepth = refBottomDepth[0];;
+    maxDepth = refBottomDepth[refBottomDepth.size() - 1];
+
+    std::vector<size_t> grid_info_vec;
+    // tbl
+    // 0 : mCellsSize
+    // 1 : mEdgesSize
+    // 2 : mMaxEdgesSize
+    // 3 : mVertexSize
+    // 4 : mVertLevels
+    // 5 : mVertLevelsP1
+    grid_info_vec.push_back(mpasoF->mGrid->mCellsSize);
+    grid_info_vec.push_back(mpasoF->mGrid->mEdgesSize);
+    grid_info_vec.push_back(mpasoF->mGrid->mMaxEdgesSize);
+    grid_info_vec.push_back(mpasoF->mGrid->mVertexSize);
+    grid_info_vec.push_back(mpasoF->mGrid->mVertLevels);
+    grid_info_vec.push_back(mpasoF->mGrid->mVertLevelsP1);
 
    std::vector<int> cell_id_vec;
    cell_id_vec.resize(width * height);
    
-   float i_step = (maxDepth - minDepth) / height;
-   float j_step = (maxLon - minLon) / width;
-   for (float i = minDepth; i < maxDepth; i = i + i_step)
-   {
-       for (float j = minLon; j < maxLon; j = j + j_step)
-       {
-           auto Lat = fixed_lat;
-           auto Lon = j;
-           SphericalCoord latlon_r = vec2(Lat * (M_PI / 180.0f), Lon * (M_PI / 180.0f));
-           CartesianCoord current_position;
-           GeoConverter::convertRadianLatLonToXYZ(latlon_r, current_position);
-           int cell_id_value = -1;
-           mpasoF->mGrid->searchKDT(current_position, cell_id_value);
-           int global_id = i * width + j;
-           cell_id_vec[global_id] = cell_id_value;
-       }
-   }
+    double i_step = (height > 1) ? (maxDepth - minDepth) / (height - 1) : 0.0;
+    double j_step = (width  > 1) ? (maxLon   - minLon)   / (width  - 1) : 0.0;
+    for (int ih = 0; ih < height; ++ih)
+    {
+        double i = -1 * minDepth + ih * i_step;
+        for (int jw = 0; jw < width; ++jw)
+        {
+            double j = minLon + jw * j_step; 
+            auto Lat = fixed_lat;
+            auto Lon = j;
+            
+            SphericalCoord latlon_r = vec2(Lat * (M_PI / 180.0f), Lon * (M_PI / 180.0f));
+            CartesianCoord current_position;
+            GeoConverter::convertRadianLatLonToXYZ(latlon_r, current_position);
+            
+            int cell_id_value = -1;
+            mpasoF->mGrid->searchKDT(current_position, cell_id_value);
+            int global_id = ih * width + jw;
+            cell_id_vec[global_id] = cell_id_value;
+        }
+    }
 
-   Debug("MPASOVisualizer::Finished KD Tree Search....");
+    Debug("MPASOVisualizer::Finished KD Tree Search....");
 
 
     auto double_nan = std::numeric_limits<double>::quiet_NaN();
     vec3 vec3_nan = { double_nan, double_nan, double_nan };
 
-    float i_step = (maxDepth - minDepth) / height;
-    float j_step = (maxLon - minLon) / width;
-    for (float i = minDepth; i < maxDepth; i = i + i_step)
+    for (int ih = 0; ih < height; ++ih)
     {
-        for (float j = minLon; j < maxLon; j = j + j_step)
+        double i = minDepth + ih * i_step;
+        double DEPTH = -std::abs(i);
+        for (int jw = 0; jw < width; ++jw)
         {
+            double j = minLon + jw * j_step; 
             // 0. convert Lat, j to xyz
             auto Lon = j;
             auto Lat = fixed_lat;
@@ -599,23 +620,24 @@ void MPASOVisualizer::VisualizeFixedLatitude(MPASOField* mpasoF, VisualizationSe
             auto current_r = r - tmp_r;
             double DEPTH = -tmp_r;
 
-            // 1. 判断在哪个cell
-            int cell_id = -1;
-            mpasoF->calcInWhichCells(position, cell_id);
+            // 1. Determine which cell it is in
+            // int cell_id = -1;
+            // mpasoF->calcInWhichCells(position, cell_id);
 
-            // 2. 判断是否在大陆上
+            int cell_id = cell_id_vec[ih * width + jw];
+            if (cell_id < 0) { img->setPixel(ih, jw, vec3_nan); continue; }
+
+            // 2. Determine whether it is on the mainland
             std::vector<size_t> current_cell_vertices_idx;
             bool is_land = mpasoF->isOnOcean(position, cell_id, current_cell_vertices_idx);
             if (is_land)
             {
-                int height_idx = (i - minDepth) / i_step;
-                int width_idx = (j - minLon) / j_step;
-                img->setPixel(height_idx, width_idx, vec3_nan);
-                is_land = false; // 重置为默认值以供下一个像素点使用
+                img->setPixel(ih, jw, vec3_nan);
                 continue;
             }
 
-            // 这个点在Cell上
+            // This point is on the Cell
+
             auto current_cell_vertices_number = mpasoF->mGrid->numberVertexOnCell_vec[cell_id];
             vec3 current_cell_vertex_pos[8];
             double current_cell_vertex_weight[8];
@@ -629,38 +651,36 @@ void MPASOVisualizer::VisualizeFixedLatitude(MPASOField* mpasoF, VisualizationSe
             // washpress
             Interpolator::CalcPolygonWachspress(position, current_cell_vertex_pos, current_cell_vertex_weight, current_cell_vertices_number);
 
-            for (auto k = 0; k < 80; ++k)
+            int nVert = 60;
+            current_point_ztop_vec.resize(nVert);
+
+            for (int k = 0; k < nVert; ++k)
             {
                 double current_point_ztop_in_layer = 0.0;
-                // 获取每个顶点的ztop
-                double current_cell_vertex_ztop[8];
-                for (auto v_idx = 0; v_idx < current_cell_vertices_number; v_idx++)
+                for (int v_idx = 0; v_idx < current_cell_vertices_number; v_idx++)
                 {
                     auto VID = current_cell_vertices_idx[v_idx];
-                    double ztop = mpasoF->mSol_Front->cellVertexZTop_vec[VID * 80 + k];
-                    current_cell_vertex_ztop[v_idx] = ztop;
+                    double ztop = mpasoF->mSol_Front->cellVertexZTop_vec[VID * nVert + k];
+                    current_point_ztop_in_layer += current_cell_vertex_weight[v_idx] * ztop;
                 }
-
-                // 计算当前点的ZTOP
-                for (auto v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx)
-                {
-                    current_point_ztop_in_layer += current_cell_vertex_weight[v_idx] * current_cell_vertex_ztop[v_idx];
-                }
-                current_point_ztop_vec[k] = current_point_ztop_in_layer;
+                current_point_ztop_vec[k] = current_point_ztop_in_layer; 
             }
 
+
             int layer = -1;
-            const double EPSILON = 1e-6;  // 设定一个小的容忍度
+            const double EPSILON = 1e-6;  // Set a small tolerance
 
-            for (size_t k = 1; k < current_point_ztop_vec.size(); ++k)
+            if (DEPTH > current_point_ztop_vec[0] + EPSILON || DEPTH < current_point_ztop_vec[nVert-1] - EPSILON)
             {
-                if (DEPTH <= current_point_ztop_vec[current_point_ztop_vec.size() - 1] - EPSILON)
-                {
-                    layer = -1;
-                    break;
-                }
+                img->setPixel(ih, jw, vec3_nan);
+                continue;
+            }
 
-                if (DEPTH <= current_point_ztop_vec[k - 1] - EPSILON && DEPTH >= current_point_ztop_vec[k] + EPSILON)
+            for (int k = 1; k < nVert; ++k)
+            {
+                double z_up = current_point_ztop_vec[k-1]; 
+                double z_dn = current_point_ztop_vec[k];   
+                if (DEPTH <= z_up + EPSILON && DEPTH >= z_dn - EPSILON)
                 {
                     layer = k;
                     break;
@@ -669,98 +689,53 @@ void MPASOVisualizer::VisualizeFixedLatitude(MPASOField* mpasoF, VisualizationSe
 
             if (layer == -1)
             {
-                if (DEPTH < current_point_ztop_vec[current_point_ztop_vec.size() - 1] + EPSILON)
-                {
-                    int height_idx = (i - minDepth) / i_step;
-                    int width_idx = (j - minLon) / j_step;
-                    img->setPixel(height_idx, width_idx, vec3_nan);
-                    continue;
-                }
-                else
-                {
-                    int height_idx = (i - minDepth) / i_step;
-                    int width_idx = (j - minLon) / j_step;
-                    img->setPixel(height_idx, width_idx, vec3_nan);
-                    continue;
-                }
+                img->setPixel(ih, jw, vec3_nan);
+                continue;
             }
 
-            double ztop_layer1, ztop_layer2;
-            ztop_layer1 = current_point_ztop_vec[layer];
-            ztop_layer2 = current_point_ztop_vec[layer - 1];
-            double t = (sycl::fabs(DEPTH) - sycl::fabs(ztop_layer1)) / (sycl::fabs(ztop_layer2) - sycl::fabs(ztop_layer1));
-            double current_point_ztop;
-            current_point_ztop = t * ztop_layer1 + (1 - t) * ztop_layer2;
-            //imgValue = { current_point_ztop , current_point_ztop , current_point_ztop };
-            vec3 final_vel;
-            // 算出 这两个layer的速度
-            vec3 vertex_vel1[8];
-            vec3 vertex_vel2[8];
-            vec3 current_point_vel1 = { 0.0, 0.0, 0.0 };
-            vec3 current_point_vel2 = { 0.0, 0.0, 0.0 };
-            for (auto v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx)
+            double ztop_layer_dn = current_point_ztop_vec[layer];     
+            double ztop_layer_up = current_point_ztop_vec[layer - 1]; 
+
+            double denom = (ztop_layer_dn - ztop_layer_up);
+            if (std::abs(denom) < 1e-30) { img->setPixel(ih, jw, vec3_nan); continue; }
+
+            double t = (DEPTH - ztop_layer_up) / denom; // t∈[0,1]: 0=upper layer center, 1=lower layer center
+
+            // 7) Perform horizontal interpolation to get velocities at two layers, then interpolate vertically using t
+            vec3 current_point_vel_up = { 0.0, 0.0, 0.0 };
+            vec3 current_point_vel_dn = { 0.0, 0.0, 0.0 };
+
+            for (int v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx)
             {
                 auto VID = current_cell_vertices_idx[v_idx];
-                vec3 vel1 = mpasoF->mSol_Front->cellVertexVelocity_vec[VID * 80 + layer];
-                vec3 vel2 = mpasoF->mSol_Front->cellVertexVelocity_vec[VID * 80 + layer - 1];
-                vertex_vel1[v_idx] = vel1;
-                vertex_vel2[v_idx] = vel2;
-            }
-            for (auto v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx)
-            {
-                current_point_vel1.x() += current_cell_vertex_weight[v_idx] * vertex_vel1[v_idx].x(); // layer
-                current_point_vel1.y() += current_cell_vertex_weight[v_idx] * vertex_vel1[v_idx].y();
-                current_point_vel1.z() += current_cell_vertex_weight[v_idx] * vertex_vel1[v_idx].z();
 
-                current_point_vel2.x() += current_cell_vertex_weight[v_idx] * vertex_vel2[v_idx].x(); //layer - 1
-                current_point_vel2.y() += current_cell_vertex_weight[v_idx] * vertex_vel2[v_idx].y();
-                current_point_vel2.z() += current_cell_vertex_weight[v_idx] * vertex_vel2[v_idx].z();
-            }
-            final_vel.x() = t * current_point_vel2.x() + (1 - t) * current_point_vel1.x();
-            final_vel.y() = t * current_point_vel2.y() + (1 - t) * current_point_vel1.y();
-            final_vel.z() = t * current_point_vel2.z() + (1 - t) * current_point_vel1.z();
+                vec3 vel_up = mpasoF->mSol_Front->cellVertexVelocity_vec[VID * nVert + (layer - 1)];
+                vec3 vel_dn = mpasoF->mSol_Front->cellVertexVelocity_vec[VID * nVert + layer];
 
-            vec3 imgValue = final_vel;
+                current_point_vel_up.x() += current_cell_vertex_weight[v_idx] * vel_up.x();
+                current_point_vel_up.y() += current_cell_vertex_weight[v_idx] * vel_up.y();
+                current_point_vel_up.z() += current_cell_vertex_weight[v_idx] * vel_up.z();
+
+                current_point_vel_dn.x() += current_cell_vertex_weight[v_idx] * vel_dn.x();
+                current_point_vel_dn.y() += current_cell_vertex_weight[v_idx] * vel_dn.y();
+                current_point_vel_dn.z() += current_cell_vertex_weight[v_idx] * vel_dn.z();
+            }
+
+            vec3 final_vel;
+            final_vel.x() = (1.0 - t) * current_point_vel_up.x() + t * current_point_vel_dn.x();
+            final_vel.y() = (1.0 - t) * current_point_vel_up.y() + t * current_point_vel_dn.y();
+            final_vel.z() = (1.0 - t) * current_point_vel_up.z() + t * current_point_vel_dn.z();
+
+            // 8) TO ENU
             double zional_velocity, merminoal_velicity;
             GeoConverter::convertXYZVelocityToENU(position, final_vel, zional_velocity, merminoal_velicity);
             vec3 current_point_velocity_enu = { zional_velocity, merminoal_velicity, 0.0 };
-            imgValue = current_point_velocity_enu;
-            
 
-
-            img->setPixel(i, j, current_point_velocity_enu);
+            img->setPixel(ih, jw, current_point_velocity_enu);
         }
     }
 
-    double latSpacing = (config->DepthRange.y() - config->DepthRange.x()) / (height - 1);
-    //double lonSpacing = (config->LonRange.y() - config->LonRange.x()) / (width - 1);
-    double lonSpacing = 1000.0 / (width - 1); // 调整后的范围
 
-    vtkSmartPointer<vtkImageData> imageData = vtkSmartPointer<vtkImageData>::New();
-    imageData->SetDimensions(width, height, 1);
-    imageData->AllocateScalars(VTK_DOUBLE, 3);
-    //imageData->SetOrigin(config->LonRange.x(), config->LatRange.x(), config->FixedLatitude);  // 设置数据的起始位置
-    //imageData->SetSpacing(lonSpacing, latSpacing, config->FixedLatitude);  // 设置每个像素的物理尺寸
-
-    for (int i = 0; i < height; ++i)
-    {
-        for (int j = 0; j < width; ++j)
-        {
-            auto pixel = img->getPixel(i, j);
-            double* pixelData = static_cast<double*>(imageData->GetScalarPointer(j, i, 0)); 
-            pixelData[0] = pixel.x();
-            pixelData[1] = pixel.y();
-            pixelData[2] = pixel.z();
-        }
-    }
-
-    
-
-    vtkSmartPointer<vtkXMLImageDataWriter> writer = vtkSmartPointer<vtkXMLImageDataWriter>::New();
-    writer->SetFileName("ouput.vti");
-    writer->SetInputData(imageData);
-    writer->Write();
-*/
 }
 
 
@@ -812,13 +787,13 @@ void MPASOVisualizer::GenerateGaussianSpherePoints(std::vector<CartesianCoord>& 
 
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::normal_distribution<double> latDist(meanLat, stdDev); // 纬度高斯分布
-    std::normal_distribution<double> lonDist(meanLon, stdDev); // 经度高斯分布
+    std::normal_distribution<double> latDist(meanLat, stdDev); // Latitude Gaussian distribution
+    std::normal_distribution<double> lonDist(meanLon, stdDev); // Longitude Gaussian distribution
 
     for (int i = 0; i < numPoints; ++i) {
         double lat, lon;
 
-        // 生成符合范围的纬度和经度
+        // Generate latitudes and longitudes within the range
         do {
             lat = latDist(gen);
         } while (lat < minLat || lat > maxLat);
@@ -827,7 +802,7 @@ void MPASOVisualizer::GenerateGaussianSpherePoints(std::vector<CartesianCoord>& 
             lon = lonDist(gen);
         } while (lon < minLon || lon > maxLon);
 
-        // 转换为笛卡尔坐标
+        // Convert to Cartesian coordinates
         SphericalCoord latlon_d = { lat, lon };
         SphericalCoord latlon_r;
         CartesianCoord position;
@@ -1124,8 +1099,6 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
             auto CalcVelocityAt = [&](const vec3& pos, int& cid) -> vec3 {
                 const int cell_id = cid; 
 
-                // use register
-                
                 
                 // 1. check in mesh
                 vec3 current_position = pos;
@@ -1494,10 +1467,10 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(MPASOField* mpasoF, std::v
     // grid_info_vec.push_back(mpasoF->mGrid->mVertLevelsP1);
 
 #pragma region sycl_buffer_grid
-    sycl::buffer<vec3, 1>   vertexCoord_buf(mpasoF->mGrid->vertexCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->vertexCoord_vec.size())); // CELL 顶点坐标
-    sycl::buffer<vec3, 1>   cellCoord_buf(mpasoF->mGrid->cellCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->cellCoord_vec.size()));       // CELL 中心坐标
-    sycl::buffer<size_t, 1> numberVertexOnCell_buf(mpasoF->mGrid->numberVertexOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->numberVertexOnCell_vec.size())); // CELL 有几个顶点
-    sycl::buffer<size_t, 1> verticesOnCell_buf(mpasoF->mGrid->verticesOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->verticesOnCell_vec.size()));             // 
+    sycl::buffer<vec3, 1>   vertexCoord_buf(mpasoF->mGrid->vertexCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->vertexCoord_vec.size())); 
+    sycl::buffer<vec3, 1>   cellCoord_buf(mpasoF->mGrid->cellCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->cellCoord_vec.size()));       
+    sycl::buffer<size_t, 1> numberVertexOnCell_buf(mpasoF->mGrid->numberVertexOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->numberVertexOnCell_vec.size())); 
+    sycl::buffer<size_t, 1> verticesOnCell_buf(mpasoF->mGrid->verticesOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->verticesOnCell_vec.size()));             
     sycl::buffer<size_t, 1> cellsOnVertex_buf(mpasoF->mGrid->cellsOnVertex_vec.data(), sycl::range<1>(mpasoF->mGrid->cellsOnVertex_vec.size()));
     sycl::buffer<size_t, 1> cells_onCell_buf(mpasoF->mGrid->cellsOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->cellsOnCell_vec.size()));
     sycl::buffer<size_t, 1> grid_info_buf(grid_info_vec.data(), sycl::range<1>(grid_info_vec.size()));

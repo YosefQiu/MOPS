@@ -56,13 +56,16 @@ bool parseCommandLine(int argc, char* argv[],
 
 int main(int argc, char* argv[])
 {
-	#if MOPS_MPI
+	#if MOPS_MPI == 1
 	MPI_Init(&argc, &argv);
 	int rank, size;
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &size);
 	std::cout << "== MPI rank: " << rank << ", size: " << size << " ==" << std::endl;
+	#else
+	int size = 1;
 	#endif
+	
 
 	if (!parseCommandLine(argc, argv, input_yaml_filename, data_path_prefix, timestep, time_range_vec, day_gap, fixed_depth)) exit(1);
 	std::cout << "== command line arguments ==" << std::endl;
@@ -137,11 +140,13 @@ int main(int argc, char* argv[])
 			config->TimeStep = timestep_vec[idx];
 			#if MOPS_VTK
 			config->SaveType = MOPS::SaveType::kVTI;
+			#else
+			config->SaveType = MOPS::SaveType::kPNG;
 			#endif
 			auto img_vec = MOPS::MOPS_RunRemapping(config);
 			#if MOPS_VTK
 			std::string str = "";
-			#if MOPS_MPI
+			#if MOPS_MPI == 1
 			str += "rank_" + std::to_string(rank_id) + "_";
 			#endif
 			str += "timestep_" + std::to_string(timestep_vec[idx]) + "_";
@@ -150,46 +155,71 @@ int main(int argc, char* argv[])
 					"E: Zonal Velocity", "N: Meridional Velocity", "Velocity Magnitude",
 					"Temperature", "Salinity", "None"
 				};
-			MOPS::VTKFileManager::SaveVTI(img_vec, config, names, str);
 			#endif
-			for (int i = 0; i < img_vec.size(); ++i)
+
+			if (config->SaveType == MOPS::SaveType::kVTI)
 			{
-				for (int ch = 0; ch < 3; ++ch)  // 通道 0,1,2
+				#if MOPS_VTK
+				MOPS::VTKFileManager::SaveVTI(img_vec, config, names, str);
+				#endif
+			}
+			else if (config->SaveType == MOPS::SaveType::kPNG)
+			{
+				for (int i = 0; i < img_vec.size(); ++i)
 				{
-					#if MOPS_MPI
-					std::string filename = "rank_" + std::to_string(rank_id) + "_output_" + std::to_string(i) + "_ch" + std::to_string(ch) + ".png";
-					#else
-					std::string filename = "output_" + std::to_string(i) + "_ch" + std::to_string(ch) + ".png";
-					#endif
-					MOPS::SaveToPNG(img_vec[i], filename, ch);
+					for (int ch = 0; ch < 3; ++ch)  // RGB channels
+					{
+						#if MOPS_MPI
+						std::string filename = "rank_" + std::to_string(rank_id) + "_output_" + std::to_string(i) + "_ch" + std::to_string(ch) + ".png";
+						#else
+						std::string filename = "output_" + std::to_string(i) + "_ch" + std::to_string(ch) + ".png";
+						#endif
+						MOPS::SaveToPNG(img_vec[i], filename, ch);
+					}
 				}
 			}
+			
 			delete config;
 			config = nullptr;
 		}
 
 
-	/*
+		
+	
 		// 7. generate sample points
 		std::vector<CartesianCoord> sample_points; 
 		std::vector<CartesianCoord> tmp_pts;
 		std::cout << "== generate sample points ==" << std::endl;
 		MOPS::SamplingSettings* sampling_conf = new MOPS::SamplingSettings();
-		sampling_conf->atCellCenter(true);
+		sampling_conf->setSampleRange(vec2i(31, 31));
+		sampling_conf->setGeoBox(vec2(35.0, 45.0),  vec2(-90.0, -15.0));
+		sampling_conf->atCellCenter(false);
 		sampling_conf->setDepth(fixed_depth);
-		MOPS::MOPS_GenerateSamplePoints(sampling_conf, tmp_pts);
-		int samples_num = 2000;
-		for (auto i = 0; i < samples_num; i++)
-		{
-			sample_points.push_back(tmp_pts[i]);
-		}
-			
-		
+		MOPS::MOPS_GenerateSamplePoints(sampling_conf, sample_points);
+		// int samples_num = 2000;
+		// for (auto i = 0; i < samples_num; i++)
+		// {
+		// 	sample_points.push_back(tmp_pts[i]);
+		// }
+		// sample_points.clear();
+		// int sel[1] = {929};
+		// for (int s : sel) {
+		// 	std::cout << "[Sample Point " << s << "] : ("
+		// 			<< tmp_pts[s].x() << ", " << tmp_pts[s].y() << ", " << tmp_pts[s].z() << ")\n";
+		// 	sample_points.push_back(tmp_pts[s]);
+		// }	
+		// for (auto i = 0; i < sample_points.size(); i++)
+		// {
+		// 	std::cout << "[Using Sample Point " << i << "] : (" 
+		// 		<< sample_points[i].x() << ", "
+		// 		<< sample_points[i].y() << ", "
+		// 		<< sample_points[i].z() << ")" << std::endl;
+		// }
 
 		// 8. generate trajectory
 		MOPS::TrajectorySettings* traj_conf = new MOPS::TrajectorySettings;
 		traj_conf->depth = fixed_depth;
-		traj_conf->deltaT = ONE_HOUR * 6;			
+		traj_conf->deltaT = ONE_HOUR * 1;			
 		traj_conf->simulationDuration = ONE_DAY * day_gap;
 		traj_conf->recordT = ONE_HOUR * 6;
 		traj_conf->fileName = "traj_line_" + std::to_string(timestep_vec[0]);
@@ -239,7 +269,7 @@ int main(int argc, char* argv[])
 		delete sampling_conf;
 		sampling_conf = nullptr;
 
-	*/
+	
 		#if MOPS_MPI
 		MPI_Barrier(MPI_COMM_WORLD);
 		std::cout << "== rank " << rank_id << " Finished ==" << std::endl;

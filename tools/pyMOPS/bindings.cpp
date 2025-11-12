@@ -167,7 +167,9 @@ PYBIND11_MODULE(pyMOPS, m) {
             }
             self.setAttributesDouble(type, vec);
         })
-        .def("getCurrentTime", &MOPS::MPASOSolution::getCurrentTime);
+        .def("getID", (int (MOPS::MPASOSolution::*)() const)&MOPS::MPASOSolution::getID)
+        .def("getTimeStamp", &MOPS::MPASOSolution::getTimeStamp);
+        
 
     py::class_<MOPS::VisualizationSettings>(m, "VisualizationSettings")
         .def(py::init<>())
@@ -314,31 +316,49 @@ PYBIND11_MODULE(pyMOPS, m) {
 
             auto traj_lines = MOPS::MOPS_RunStreamLine(config, sample_points_vec);
 
-            py::list py_lines;
-            for (const auto& line : traj_lines) {
-                std::vector<ssize_t> shape = {static_cast<ssize_t>(line.points.size()), 6};
-                std::vector<ssize_t> strides = {sizeof(double) * 6, sizeof(double)};
-                py::array_t<double> arr(shape, strides);
-                auto buf = arr.mutable_unchecked<2>();
-                for (size_t i = 0; i < line.points.size(); ++i) {
-                    buf(i, 0) = line.points[i].x();
-                    buf(i, 1) = line.points[i].y();
-                    buf(i, 2) = line.points[i].z();
-                    buf(i, 3) = line.velocity[i].x();
-                    buf(i, 4) = line.velocity[i].y();
-                    buf(i, 5) = line.velocity[i].z();
+            py::list out;
+            const double kNaN = std::numeric_limits<double>::quiet_NaN();
+
+            for (const auto& ln : traj_lines) {
+                const size_t np = ln.points.size();
+                const size_t nv = ln.velocity.size();
+
+                // (N,3) arrays
+                py::array_t<double> pts({(py::ssize_t)np, (py::ssize_t)3});
+                py::array_t<double> vel({(py::ssize_t)np, (py::ssize_t)3});
+
+                auto P = pts.mutable_unchecked<2>();
+                auto V = vel.mutable_unchecked<2>();
+
+                for (size_t i = 0; i < np; ++i) {
+                    const auto& p = ln.points[i];
+                    P(i,0) = p.x(); P(i,1) = p.y(); P(i,2) = p.z();
+
+                    if (i < nv) {
+                        const auto& v = ln.velocity[i];
+                        V(i,0) = v.x(); V(i,1) = v.y(); V(i,2) = v.z();
+                    } else {
+                        V(i,0) = V(i,1) = V(i,2) = kNaN;
+                    }
                 }
-                py_lines.append(arr);
+
+                py::dict d;
+                d["lineID"]    = ln.lineID;      // keep if available; remove if not needed
+                d["points"]    = std::move(pts);
+                d["velocity"]  = std::move(vel);
+
+                
+
+                out.append(std::move(d));
             }
 
-            return py_lines;
+            return out;
         },
         "Run streamline simulation");
 
     m.def("MOPS_RunPathLine", 
         [](MOPS::TrajectorySettings* config, 
-            py::array_t<double> sample_points_np,
-            const std::vector<int>& timesteps_in) {
+            py::array_t<double> sample_points_np) {
             
             // check shape
             if (sample_points_np.ndim() != 2 || sample_points_np.shape(1) != 3) {
@@ -351,9 +371,7 @@ PYBIND11_MODULE(pyMOPS, m) {
                 sample_points_vec.emplace_back(r(i, 0), r(i, 1), r(i, 2));
             }
 
-            auto timesteps = timesteps_in;
-
-            auto traj_lines = MOPS::MOPS_RunPathLine(config, sample_points_vec, timesteps);
+            auto traj_lines = MOPS::MOPS_RunPathLine(config, sample_points_vec);
 
             py::list out;
             const double double_NaN = std::numeric_limits<double>::quiet_NaN();
@@ -364,7 +382,6 @@ PYBIND11_MODULE(pyMOPS, m) {
                 const size_t nt = ln.temperature.size();
                 const size_t ns = ln.salinity.size();
 
-                // 输出都按 points.size() 对齐
                 py::array_t<double> pts({(py::ssize_t)np, (py::ssize_t)3});
                 py::array_t<double> vel({(py::ssize_t)np, (py::ssize_t)3});
                 py::array_t<double> tem((py::ssize_t)np);
@@ -415,6 +432,5 @@ PYBIND11_MODULE(pyMOPS, m) {
         },
         py::arg("config"),
         py::arg("sample_points_np"),
-        py::arg("timesteps_in"),
         "Run pathline simulation");
 }

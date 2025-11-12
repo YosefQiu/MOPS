@@ -35,13 +35,12 @@ void MPASOField::calcInWhichCells(std::vector<CartesianCoord>& points_vec, std::
 
 bool MPASOField::isOnOcean(const vec3& position, int& cell_id, std::vector<size_t>& current_cell_vertices_idx)
 {
-    // 2. 判断是否在大陆上
-        bool is_land = false; // 标记是否为陆地
+        bool is_land = false; 
 #pragma region cell_or_not
-                //      2.1 找到这个CELL的所有顶点
+
     auto current_cell_vertices_number = mGrid->numberVertexOnCell_vec[cell_id];
     mGrid->getVerticesOnCell(cell_id, mGrid->verticesOnCell_vec, current_cell_vertices_idx);
-    //      2.2 删除不存在的顶点
+
     if (current_cell_vertices_idx.size() != current_cell_vertices_number)
     {
         current_cell_vertices_idx.resize(current_cell_vertices_number);
@@ -71,7 +70,7 @@ bool MPASOField::isOnOcean(const vec3& position, int& cell_id, std::vector<size_
         double currentSign = (dir > 0) ? 1.0 : -1.0;
         if (currentSign != sign)
         {
-            // 这个点在大陆上
+            // This point is on the mainland
             //pixel_color = vec3(0.0, 0.0, 0.0);
             is_land = true;
             break;

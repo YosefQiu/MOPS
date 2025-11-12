@@ -6,6 +6,13 @@ namespace MOPS
 {
     enum class AttributeFormat : int { kDouble, kFloat, kChar, kVec3, kCount };
     enum class AttributeType : int { kZonalVelocity, kMeridionalVelocity, kVelocity, kNormalVelocity, kZTop, kLayerThickness, kBottomDepth, kCount };
+    
+    struct SolutionID
+    {
+        std::string timeStamp;
+        int timestep;
+    };
+
     class MPASOSolution
     {
     public:
@@ -16,8 +23,10 @@ namespace MOPS
         void initSolution_DemoLoading(const char* yaml_path, int timestep);
         void initSolution_FromBin(const char* prefix);
     public:
-        std::string mCurrentTime;
+        std::string mTimeStamp;
         std::string mDataName;
+
+        SolutionID mID;
 
         int mCellsSize;
         int mEdgesSize;
@@ -58,7 +67,20 @@ namespace MOPS
 
 
     public:
-        std::string getCurrentTime() const { return mCurrentTime; }
+        int getID(SolutionID ID) const 
+        {
+            std::string key = ID.timeStamp + "_" + std::to_string(ID.timestep);
+            // 32-bit FNV-1a hash
+            uint32_t hash = 2166136261u;
+            for (unsigned char c : key)
+                hash = (hash ^ c) * 16777619u;
+            return static_cast<int>(hash);
+        }
+        int getID() const 
+        {
+            return getID(mID);
+        }
+        std::string getTimeStamp() const { return mTimeStamp; }
         // ** Deprecated **
         // All get functions are the default data on the CPU side. 
         // When the data is on the GPU side, 

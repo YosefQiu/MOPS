@@ -4,15 +4,14 @@
 #include "Utils/Utils.hpp"
 #include "Utils/YamlGen.hpp"
 #include "IO/VTKFileManager.hpp"
-
 #include "IO/MPASOReader.h"
-#include <vector>
+
 
 
 std::vector<CartesianCoord> lastPts_vec;
 float fixed_depth = 10.0;
 
-void testPathLine(const std::string name_prefix, float fixed_depth, bool isFirstPts, int day_gap, std::vector<int> timestep_vec)
+void tutorial_pathLine(const std::string name_prefix, float fixed_depth, bool isFirstPts, int day_gap)
 {
 	std::vector<CartesianCoord> sample_points; 
 	if (isFirstPts)
@@ -61,9 +60,10 @@ void testPathLine(const std::string name_prefix, float fixed_depth, bool isFirst
 	
 	std::cout << "== multiple timesteps [pathline] ==" << std::endl;
     
-	auto lines = MOPS::MOPS_RunPathLine(traj_conf, sample_points, timestep_vec);
+	auto lines = MOPS::MOPS_RunPathLine(traj_conf, sample_points);
 	std::cout << "length " << lines[0].points.size() << std::endl;
 	MOPS::VTKFileManager::SaveTrajectoryLinesAsVTP(lines, traj_conf->fileName);
+	
 	// save last pts to memory
     lastPts_vec.clear();
 	std::vector<vec3> last_pts;
@@ -83,7 +83,6 @@ void testPathLine(const std::string name_prefix, float fixed_depth, bool isFirst
 
 		if (!found) 
         {
-			// std::cerr << "[Warn]::line[" << idx << "] all points are (0,0,0), inserting dummy zero.\n";
 			last_pts.push_back(pts.back());  // or CartesianCoord{0, 0, 0};
 		}
 	}
@@ -97,45 +96,49 @@ void testPathLine(const std::string name_prefix, float fixed_depth, bool isFirst
 }
 
 
-void testIO()
+void IO()
 {
     const char* yaml_path = "/pscratch/sd/q/qiuyf/MOPS_Tutorial/test.yaml";
-
+	int timestep = 0;
 	auto mpasoGrid = std::make_shared<MOPS::MPASOGrid>();
     auto solFront = std::make_shared<MOPS::MPASOSolution>();
 	auto solBack = std::make_shared<MOPS::MPASOSolution>();
 
-    auto pairs1 = MOPS_IO::make_forward_month_pairs(18, 1, 20, 12);
-    std::cout << "Total pairs: " << pairs1.size() << std::endl;
+    auto pairs = MOPS_IO::make_forward_month_pairs(18, 1, 18, 3);
+    std::cout << "Total pairs: " << pairs.size() << std::endl;
 
 	mpasoGrid->initGrid(MOPS::MPASOReader::readGridData(yaml_path).get());
 	bool isFirst = true;
 
     MOPS::MOPS_Init("gpu");
 
-    for (const auto& p : pairs1)
+    for (const auto& p : pairs)
     {
         std::cout << "pair: " << p.first << " to " << p.second << std::endl;
 
-        solFront->initSolution(MOPS::MPASOReader::readSolData(yaml_path, p.first, 0).get());
-        solBack->initSolution(MOPS::MPASOReader::readSolData(yaml_path, p.second, 0).get());
-        solFront->addAttribute("temperature", MOPS::AttributeFormat::kFloat);
+        solFront->initSolution(MOPS::MPASOReader::readSolData(yaml_path, p.first, timestep).get());
+        solBack->initSolution(MOPS::MPASOReader::readSolData(yaml_path, p.second, timestep).get());
+        
+		solFront->addAttribute("temperature", MOPS::AttributeFormat::kFloat);
         solFront->addAttribute("salinity", MOPS::AttributeFormat::kFloat);
         solBack->addAttribute("temperature", MOPS::AttributeFormat::kFloat);
         solBack->addAttribute("salinity", MOPS::AttributeFormat::kFloat);
         
-        auto t1 =solFront->getCurrentTime();
-        auto t2 = solBack->getCurrentTime();
-        auto fileNamePreix = "PathLine_" + std::to_string(toIntYMD(p.first)) + "_to_" + std::to_string(toIntYMD(p.second));
+        auto t1 =solFront->getTimeStamp();
+        auto t2 = solBack->getTimeStamp();
+
+		auto fileNamePrefix = "PathLine_" + std::to_string(toIntYMD(p.first)) + "_to_" + std::to_string(toIntYMD(p.second));
         std::cout << toIntYMD(p.first) << " " << toIntYMD(p.second) << std::endl;
-        MOPS::MOPS_Begin();
+        
+		MOPS::MOPS_Begin();
         MOPS::MOPS_AddGridMesh(mpasoGrid);
-        MOPS::MOPS_AddAttribute(toIntYMD(p.first), solFront);
-        MOPS::MOPS_AddAttribute(toIntYMD(p.second), solBack);
+        MOPS::MOPS_AddAttribute(solFront->getID(), solFront);
+        MOPS::MOPS_AddAttribute(solBack->getID(), solBack);
         MOPS::MOPS_End();
-        MOPS::MOPS_ActiveAttribute(toIntYMD(p.first), toIntYMD(p.second));
-        std::vector<int> timestep_vec = {toIntYMD(p.first), toIntYMD(p.second)};
-        testPathLine(fileNamePreix, fixed_depth, isFirst, getTimeGapinSecond(t2.c_str(), t1.c_str()), timestep_vec);
+        
+		MOPS::MOPS_ActiveAttribute(solFront->getID(), solBack->getID());
+        
+        tutorial_pathLine(fileNamePrefix, fixed_depth, isFirst, getTimeGapinSecond(t2.c_str(), t1.c_str()));
         isFirst = false;
     }
 
@@ -144,7 +147,7 @@ void testIO()
 int main()
 {
 	
-    testIO();
+    IO();
 
 	return 0;
 }

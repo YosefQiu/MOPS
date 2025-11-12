@@ -145,6 +145,7 @@ MPASOReader::Ptr MPASOReader::readGridData(const std::string& yaml_path)
     copyFromNdarray_Int(gs.get(), "nEdgesOnCell", reader->numberVertexOnCell_vec);
     copyFromNdarray_Int(gs.get(), "cellsOnEdge", reader->cellsOnEdge_vec);
     copyFromNdarray_Int(gs.get(), "edgesOnCell", reader->edgesOnCell_vec);
+    copyFromNdarray_Double(gs.get(), "refBottomDepth", reader->cellRefBottomDepth_vec);
 
     reader->mCellsSize = reader->cellCoord_vec.size();
     reader->mEdgesSize = reader->edgeCoord_vec.size();
@@ -189,6 +190,11 @@ MPASOReader::Ptr MPASOReader::readSolData(const std::string& yaml_path, const st
     reader->mGroupT = gs;
 
     reader->mTimesteps = timestep;
+    if (reader->mTimesteps < 0)
+    {
+        std::cerr << "[MPASOReader]::Error: Invalid timestep index " << reader->mTimesteps << std::endl;
+        exit(-1);
+    }
     auto dataName = removeFileExtension(*it);
     reader->mDataName = dataName;
     reader->mFolderName = reader->mStream->path_prefix;
@@ -196,7 +202,7 @@ MPASOReader::Ptr MPASOReader::readSolData(const std::string& yaml_path, const st
     std::vector<char> time_vec_s;
     std::vector<char> time_vec_e;
    
-    std::cout << "          [ timestep = " << timestep << " ]\n";
+    std::cout << "          [ MPASOReader::readSolData::timestep = " << timestep << " ]\n";
     copyFromNdarray_Double(gs.get(), "bottomDepth", reader->cellBottomDepth_vec);
     copyFromNdarray_Double(gs.get(), "seaSurfaceHeight", reader->cellSurfaceHeight_vec);
     copyFromNdarray_Double(gs.get(), "velocityZonal", reader->cellZonalVelocity_vec);
@@ -205,7 +211,7 @@ MPASOReader::Ptr MPASOReader::readSolData(const std::string& yaml_path, const st
     copyFromNdarray_Double(gs.get(), "zTop", reader->cellZTop_vec);
     copyFromNdarray_Double(gs.get(), "normalVelocity", reader->cellNormalVelocity_vec);
     copyFromNdarray_Char(gs.get(), "xtime", time_vec_s);
-    reader->mCurrentTime = std::string(time_vec_s.begin(), time_vec_s.end());
+    reader->mTimeStamp = std::string(time_vec_s.begin(), time_vec_s.end());
     
     if (reader->cellSurfaceHeight_vec.size() != 0)
     {
@@ -219,7 +225,7 @@ MPASOReader::Ptr MPASOReader::readSolData(const std::string& yaml_path, const st
     }
         
     
-    Debug("%-40s = \t [ %s ]", "[MPASOReader]:: mCurrentTime", reader->mCurrentTime.c_str());
+    Debug("%-40s = \t [ %s ]", "[MPASOReader]:: mTimeStamp", reader->mTimeStamp.c_str());
     Debug("%-40s = \t [ %d ]", "[MPASOReader]:: mVertLevels", reader->mVertLevels);
     Debug("%-40s = \t [ %d ]", "[MPASOReader]:: mVertLevelsP1", reader->mVertLevelsP1);
 
@@ -241,6 +247,11 @@ void MPASOReader::appendSolData(MPASOReader* reader, const std::string& yaml_pat
     std::cout << "Reading time: " << time_span.count() << " seconds." << std::endl;
 
     reader->mTimesteps = timestep;
+    if (reader->mTimesteps < 0)
+    {
+        std::cerr << "[MPASOReader]::Error: Invalid timestep index " << reader->mTimesteps << std::endl;
+        exit(-1);
+    }
     auto dataName = removeFileExtension(reader->mStream->substreams[1]->filenames[0]);
     reader->mDataName = dataName;
     reader->mFolderName = reader->mStream->path_prefix;
@@ -250,8 +261,8 @@ void MPASOReader::appendSolData(MPASOReader* reader, const std::string& yaml_pat
 
     std::vector<char> time_vec_s;
     std::vector<char> time_vec_e;
-   
-    std::cout << "          [ timestep = " << timestep << " ]\n";
+
+    std::cout << "          [ MPASOReader::readSolData::timestep = " << timestep << " ]\n";
     copyFromNdarray_Double(gs.get(), "bottomDepth", reader->cellBottomDepth_vec);
     copyFromNdarray_Double(gs.get(), "seaSurfaceHeight", reader->cellSurfaceHeight_vec);
     copyFromNdarray_Double(gs.get(), "velocityZonal", reader->cellZonalVelocity_vec);
@@ -260,7 +271,7 @@ void MPASOReader::appendSolData(MPASOReader* reader, const std::string& yaml_pat
     copyFromNdarray_Double(gs.get(), "zTop", reader->cellZTop_vec);
     copyFromNdarray_Double(gs.get(), "normalVelocity", reader->cellNormalVelocity_vec);
     copyFromNdarray_Char(gs.get(), "xtime", time_vec_s);
-    reader->mCurrentTime = std::string(time_vec_s.begin(), time_vec_s.end());
+    reader->mTimeStamp = std::string(time_vec_s.begin(), time_vec_s.end());
 
 
     if (reader->cellSurfaceHeight_vec.size() != 0)
@@ -275,7 +286,7 @@ void MPASOReader::appendSolData(MPASOReader* reader, const std::string& yaml_pat
     }
         
     
-    Debug("%-40s = \t [ %s ]", "[MPASOReader]:: mCurrentTime", reader->mCurrentTime.c_str());
+    Debug("%-40s = \t [ %s ]", "[MPASOReader]:: mTimeStamp", reader->mTimeStamp.c_str());
     Debug("%-40s = \t [ %d ]", "[MPASOReader]:: mVertLevels", reader->mVertLevels);
     Debug("%-40s = \t [ %d ]", "[MPASOReader]:: mVertLevelsP1", reader->mVertLevelsP1);
 
@@ -365,7 +376,7 @@ void MPASOReader::copyFromNdarray_Double(ftk::ndarray_group* g, std::string valu
         // std::cout << "tmp_get = " << tmp_get.get() << std::endl;
         //  std::cout << "Actual type of tmp_get: " << typeid(*tmp_get).name() << std::endl;
         auto tmp_ptr_float = std::dynamic_pointer_cast<ftk::ndarray<float>>(g->get(value));
-        if (tmp_ptr_float) // 检查转换是否成功
+        if (tmp_ptr_float) 
         {
 
             // std::cout << "tmp_ptr = " << tmp_ptr.get() << std::endl;
@@ -410,7 +421,7 @@ void MPASOReader::copyFromNdarray_Char(ftk::ndarray_group* g, std::string value,
         std::cout << "====== " << value << " found [\u2713]" << std::endl;
         auto tmp_get = g->get(value);
         auto tmp_ptr = std::dynamic_pointer_cast<ftk::ndarray<char>>(g->get(value));
-        if (tmp_ptr) // 检查转换是否成功
+        if (tmp_ptr) // Check if the cast was successful
         {
             auto tmp_vec = tmp_ptr->std_vector();
             vec.resize(tmp_vec.size());

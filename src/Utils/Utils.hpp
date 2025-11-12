@@ -26,7 +26,7 @@ inline bool compareByDate(const std::string& a, const std::string& b)
 
 inline bool compareByNumber(const std::string& a, const std::string& b)
 {
-    std::regex re(R"((\d+))"); // 匹配数字序列
+    std::regex re(R"((\d+))"); 
     std::smatch ma, mb;
     int na = 0, nb = 0;
 

@@ -37,7 +37,7 @@ void MPASOSolution::initSolution_FromBin(const char* prefix)
 void MPASOSolution::initSolution(MPASOReader* reader)
 {
     
-    this->mCurrentTime = std::move(reader->mCurrentTime);
+    this->mTimeStamp = std::move(reader->mTimeStamp);
     this->mVertLevels = std::move(reader->mVertLevels);
     this->mVertLevelsP1 = std::move(reader->mVertLevelsP1);
     this->mTimesteps = std::move(reader->mTimesteps);
@@ -53,8 +53,11 @@ void MPASOSolution::initSolution(MPASOReader* reader)
     this->cellZTop_vec = std::move(reader->cellZTop_vec);
     this->cellNormalVelocity_vec = std::move(reader->cellNormalVelocity_vec);
 
+    mID.timeStamp = this->mTimeStamp;
+    mID.timestep = this->mTimesteps;
 
-    // std::cout << "mCurrentTime = " << this->mCurrentTime << std::endl;
+
+    // std::cout << "mTimeStamp = " << this->mTimeStamp << std::endl;
     // std::cout << "mVertLevels = " << this->mVertLevels << std::endl;
     // std::cout << "mVertLevelsP1 = " << this->mVertLevelsP1 << std::endl;
     // std::cout << "cellBottomDepth_vec size = " << this->cellBottomDepth_vec.size() << std::endl;
@@ -71,7 +74,7 @@ void MPASOSolution::initSolution(ftk::ndarray_group* g, MPASOReader* reader)
 {
     std::cout << "==========================================\n";
     
-    // this->mCurrentTime = std::move(reader->currentTimestep);
+    // this->mTimeStamp = std::move(reader->currentTimestep);
     this->mCellsSize = reader->mCellsSize;
     this->mEdgesSize = reader->mEdgesSize;
     this->mMaxEdgesSize = reader->mMaxEdgesSize;
@@ -85,7 +88,7 @@ void MPASOSolution::initSolution(ftk::ndarray_group* g, MPASOReader* reader)
     std::vector<char> time_vec_s;
     std::vector<char> time_vec_e;
    
-    std::cout << "          [ timestep = " << this->mTimesteps << " ]\n";
+    std::cout << "          [ MPASOSolution::initSolution::timestep = " << this->mTimesteps << " ]\n";
     copyFromNdarray_Double(g, "bottomDepth", this->cellBottomDepth_vec);
     copyFromNdarray_Double(g, "velocityZonal", this->cellZonalVelocity_vec);
     copyFromNdarray_Double(g, "velocityMeridional", this->cellMeridionalVelocity_vec);
@@ -93,6 +96,8 @@ void MPASOSolution::initSolution(ftk::ndarray_group* g, MPASOReader* reader)
     copyFromNdarray_Double(g, "timeMonthly_avg_zTop", this->cellZTop_vec);
     copyFromNdarray_Double(g, "normalVelocity", this->cellNormalVelocity_vec);
 
+    mID.timeStamp = this->mTimeStamp;
+    mID.timestep = this->mTimesteps;
    
     
     // copyFromNdarray_Char(g, "xtime_startMonthly", time_vec_s);
@@ -157,6 +162,7 @@ void MPASOSolution::addAttribute(std::string name, AttributeFormat type)
 
    
 }
+
 void MPASOSolution::getCellVelocity(const size_t cell_id, const size_t level, std::vector<vec3>& cell_on_velocity, vec3& vel)
 {
     auto VertLevels = mVertLevels;
@@ -184,12 +190,12 @@ void MPASOSolution::getCellVertVelocity(const size_t cell_id,
 
 void MPASOSolution::getCellZTop(const size_t cell_id, const size_t level, std::vector<double>& cell_ztop, double& ztop)
 {
-    // 单元格0，层0的顶部Z坐标
-    // 单元格0，层1的顶部Z坐标
-    // 单元格0，层2的顶部Z坐标
-    // 单元格1，层0的顶部Z坐标
-    // 单元格1，层1的顶部Z坐标
-    // 单元格1，层2的顶部Z坐标
+    // Cell 0, the top Z coordinate of layer 0
+    // Cell 0, the top Z coordinate of layer 1
+    // Cell 0, the top Z coordinate of layer 2
+    // Cell 1, the top Z coordinate of layer 0
+    // Cell 1, the top Z coordinate of layer 1
+    // Cell 1, the top Z coordinate of layer 2
     auto VertLevels = mVertLevels;
     if (VertLevels == -1 || VertLevels == 0)
     {
@@ -212,12 +218,12 @@ void MPASOSolution::getEdgeNormalVelocity(const size_t edge_id, const size_t lev
 
 void MPASOSolution::getCellLayerThickness(const size_t cell_id, const size_t level, std::vector<double>& cell_thickness, double& thinckness)
 {
-    // 单元格0，层0的厚度
-    // 单元格0，层1的厚度
-    // 单元格0，层2的厚度
-    // 单元格1，层0的厚度
-    // 单元格1，层1的厚度
-    // 单元格1，层2的厚度
+    // Cell 0, the thickness of layer 0
+    // Cell 0, the thickness of layer 1
+    // Cell 0, the thickness of layer 2
+    // Cell 1, the thickness of layer 0
+    // Cell 1, the thickness of layer 1
+    // Cell 1, the thickness of layer 2
 
     auto VertLevels = mVertLevels;
     if (VertLevels == -1 || VertLevels == 0)
@@ -240,12 +246,13 @@ void MPASOSolution::getCellSurfaceZonalVelocity(const size_t cell_id, std::vecto
 
 void MPASOSolution::getCellCenterZTop(const size_t cell_id, const size_t level, std::vector<double>& cell_ztop, double& ztop)
 {
-    // 单元格0，层0的顶部Z坐标
-    // 单元格0，层1的顶部Z坐标
-    // 单元格0，层2的顶部Z坐标
-    // 单元格1，层0的顶部Z坐标
-    // 单元格1，层1的顶部Z坐标
-    // 单元格1，层2的顶部Z坐标
+    // Cell 0, the top Z coordinate of layer 0
+    // Cell 0, the top Z coordinate of layer 1
+    // Cell 0, the top Z coordinate of layer 2
+    // Cell 1, the top Z coordinate of layer 0
+    // Cell 1, the top Z coordinate of layer 1
+    // Cell 1, the top Z coordinate of layer 2
+
     auto VertLevels = mVertLevels;
     if (VertLevels == -1 || VertLevels == 0)
     {
@@ -280,14 +287,14 @@ void MPASOSolution::calcCellCenterZtop()
 {
     Debug(("[MPASOSolution]::Calc Cell Center Z Top at t = " + std::to_string(mTimesteps)).c_str());
 
-    // 1. 判断是否有layerThickness
+    // 1. Check if layerThickness exists
     if (cellLayerThickness_vec.empty())
     {
         Debug("ERROR, cellLayerThickness is not defined");
         exit(0);
     }
 
-    // 2. 计算ZTop
+    // 2. Calculate ZTop
     auto nCellsSize = mCellsSize;
     auto nVertLevelsP1      =  mVertLevelsP1;
     auto nVertLevels = mVertLevels;
@@ -427,7 +434,7 @@ void saveDataToTextFile(const std::vector<double>& data, const std::string& file
         }
     }
 
-    if (count % MAX_VERTEX_NUM != 0) {  // 如果数据总数不是7的倍数，在文件末尾添加换行
+    if (count % MAX_VERTEX_NUM != 0) {  // If the total number of data is not a multiple of 7, add a newline at the end of the file
         outfile << std::endl;
     }
 
@@ -452,7 +459,7 @@ void saveDataToTextFile3(const std::vector<vec3>& data, const std::string& filen
         }
     }
 
-    if (count % MAX_VERTEX_NUM != 0) {  // 如果数据总数不是7的倍数，在文件末尾添加换行
+    if (count % MAX_VERTEX_NUM != 0) {  // If the total number of data is not a multiple of 7, add a newline at the end of the file
         outfile << std::endl;
     }
 
@@ -491,15 +498,15 @@ void MPASOSolution::calcCellVertexZtop(MPASOGrid* grid, std::string& dataDir, sy
     grid_info_vec.push_back(grid->mVertLevelsP1);
     
 #if USE_SYCL
-    sycl::buffer<vec3, 1> vertexCoord_buf(grid->vertexCoord_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size())); // CELL 顶点坐标
-    sycl::buffer<vec3, 1> cellCoord_buf(grid->cellCoord_vec.data(), sycl::range<1>(grid->cellCoord_vec.size()));       // CELL 中心坐标
+    sycl::buffer<vec3, 1> vertexCoord_buf(grid->vertexCoord_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size())); // CELL vertex coordinate
+    sycl::buffer<vec3, 1> cellCoord_buf(grid->cellCoord_vec.data(), sycl::range<1>(grid->cellCoord_vec.size()));       // CELL center coordinate
 
-    sycl::buffer<size_t, 1> numberVertexOnCell_buf(grid->numberVertexOnCell_vec.data(), sycl::range<1>(grid->numberVertexOnCell_vec.size())); // CELL 有几个顶点
+    sycl::buffer<size_t, 1> numberVertexOnCell_buf(grid->numberVertexOnCell_vec.data(), sycl::range<1>(grid->numberVertexOnCell_vec.size())); // Number of vertices per CELL
     sycl::buffer<size_t, 1> verticesOnCell_buf(grid->verticesOnCell_vec.data(), sycl::range<1>(grid->verticesOnCell_vec.size()));             // 
     sycl::buffer<size_t, 1> cellsOnVertex_buf(grid->cellsOnVertex_vec.data(), sycl::range<1>(grid->cellsOnVertex_vec.size()));
 
-    sycl::buffer<double, 1> cellCenterZTop_buf(cellZTop_vec.data(), sycl::range<1>(cellZTop_vec.size()));                           //CELL 中心ZTOP
-    sycl::buffer<double, 1> cellVertexZTop_buf(cellVertexZTop_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size() * mTotalZTopLayer));        //CELL 顶点ZTOP （要求的）
+    sycl::buffer<double, 1> cellCenterZTop_buf(cellZTop_vec.data(), sycl::range<1>(cellZTop_vec.size()));                           //CELL center ZTOP
+    sycl::buffer<double, 1> cellVertexZTop_buf(cellVertexZTop_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size() * mTotalZTopLayer));        //CELL vertex ZTOP (required)
   
     sycl::buffer<size_t, 1> grid_info_buf(grid_info_vec.data(), sycl::range<1>(grid_info_vec.size())); 
 
@@ -528,38 +535,38 @@ void MPASOSolution::calcCellVertexZtop(MPASOGrid* grid, std::string& dataDir, sy
             const int NEIGHBOR_NUM = 3;
             const int TOTAY_ZTOP_LAYER = acc_grid_info_buf[4];
             const int VERTLEVELS = acc_grid_info_buf[4];
-            // 1. 找出这个cell 的所有顶点 不存在的置为nan
+            // 1. Find all vertices of this cell, set non-existent ones to nan
             
-            // 1.1 计算这个CELL 有多少个顶点
+            // 1.1 Calculate how many vertices this cell has
             auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
             auto nan = std::numeric_limits<size_t>::max();
-            // 1.2 找出所有候选顶点
+            // 1.2 Find all candidate vertices
             size_t current_cell_vertices_idx[MAX_VERTEX_NUM];
             // for (size_t k = 0; k < MAX_VERTEX_NUM; ++k)
             // {
             //     current_cell_vertices_idx[k] = acc_verticesOnCell_buf[cell_id * MAX_VERTEX_NUM + k] - 1; // Assuming 7 is the max number of vertices per cell
             // }
-            // // 1.3 不存在的顶点设置为nan
+            // // 1.3 Set non-existent vertices to nan
             // for (size_t k = current_cell_vertices_number; k < MAX_VERTEX_NUM; ++k)
             // {
             //     current_cell_vertices_idx[k] = nan;
             // }
             SYCLKernel::GetCellVerticesIdx(cell_id, current_cell_vertices_number, current_cell_vertices_idx, MAX_VERTEX_NUM, max_edge, acc_verticesOnCell_buf);
-            // =============================== 找到max_edges个顶点
+            // =============================== Find max_edges vertices.
             double current_cell_vertices_value[MAX_VERTEX_NUM];
             bool bBoundary = false;
             for (auto k = 0; k < MAX_VERTEX_NUM; ++k)
             {
                 auto vertex_idx = current_cell_vertices_idx[k];
-                // 2.1 如果是nan 跳过
+                // 2.1 If it is nan, skip
                 if (vertex_idx == nan) { current_cell_vertices_value[k] = std::numeric_limits<double>::quiet_NaN(); continue; }
                 auto current_vertex = acc_vertexCoord_buf[vertex_idx];
-                // 2.2 如果不是nan 找到含有这个顶点的3个cell id(候选) **边界情况没有3个**
+                // 2.2 If it is not nan, find the 3 cell ids containing this vertex (candidates) **Boundary cases do not have 3**
                 size_t tmp_cell_id[3];
                 tmp_cell_id[0] = acc_cellsOnVertex_buf[3 * vertex_idx + 0] - 1;
                 tmp_cell_id[1] = acc_cellsOnVertex_buf[3 * vertex_idx + 1] - 1;
                 tmp_cell_id[2] = acc_cellsOnVertex_buf[3 * vertex_idx + 2] - 1;
-                // 2.3 找到这3个CELL 的中心ZTOP
+                // 2.3 Find the center ZTOP of these 3 cells
                 double tmp_cell_center_ztop[3];
                 int valid_count = 0;
                 for (auto tmp_cell = 0; tmp_cell < NEIGHBOR_NUM; tmp_cell++)
@@ -580,7 +587,7 @@ void MPASOSolution::calcCellVertexZtop(MPASOGrid* grid, std::string& dataDir, sy
                         valid_count++;
                     }
                 }
-                // 2.4 如果是边界点
+                // 2.4 If it is a boundary point
                 if (bBoundary)
                 {
                     current_cell_vertices_value[k] = 0.0 * tmp_cell_center_ztop[0] + 0.0 * tmp_cell_center_ztop[1] + 0.0 * tmp_cell_center_ztop[2];
@@ -605,7 +612,7 @@ void MPASOSolution::calcCellVertexZtop(MPASOGrid* grid, std::string& dataDir, sy
     // auto host_accessor = cellVertexZTop_buf.get_access<sycl::access::mode::read>();
     auto host_accessor = cellVertexZTop_buf.get_host_access(sycl::read_only);
     auto range = host_accessor.get_range();
-    size_t acc_length = range.size(); // 获取缓冲区的总大小
+    size_t acc_length = range.size(); // Get the total size of the buffer
 
     // std::cout << "acc_cellVertexZTop_buf.size() = " << cellVertexZTop_vec.size() << " " << acc_length << std::endl;
     // std::cout << "mVerticesSize x nVertLevels = " << grid->mVertexSize * mVertLevels << std::endl;
@@ -648,15 +655,15 @@ void MPASOSolution::calcCellCenterToVertex(const std::string& name, const std::v
     grid_info_vec.push_back(grid->mVertLevelsP1);
     
 #if USE_SYCL
-    sycl::buffer<vec3, 1> vertexCoord_buf(grid->vertexCoord_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size())); // CELL 顶点坐标
-    sycl::buffer<vec3, 1> cellCoord_buf(grid->cellCoord_vec.data(), sycl::range<1>(grid->cellCoord_vec.size()));       // CELL 中心坐标
+    sycl::buffer<vec3, 1> vertexCoord_buf(grid->vertexCoord_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size())); // CELL vertex coordinates
+    sycl::buffer<vec3, 1> cellCoord_buf(grid->cellCoord_vec.data(), sycl::range<1>(grid->cellCoord_vec.size()));       // CELL center coordinates
 
-    sycl::buffer<size_t, 1> numberVertexOnCell_buf(grid->numberVertexOnCell_vec.data(), sycl::range<1>(grid->numberVertexOnCell_vec.size())); // CELL 有几个顶点
+    sycl::buffer<size_t, 1> numberVertexOnCell_buf(grid->numberVertexOnCell_vec.data(), sycl::range<1>(grid->numberVertexOnCell_vec.size())); // Number of vertices per CELL
     sycl::buffer<size_t, 1> verticesOnCell_buf(grid->verticesOnCell_vec.data(), sycl::range<1>(grid->verticesOnCell_vec.size()));             // 
     sycl::buffer<size_t, 1> cellsOnVertex_buf(grid->cellsOnVertex_vec.data(), sycl::range<1>(grid->cellsOnVertex_vec.size()));
 
-    sycl::buffer<double, 1> cellCenterAttr_buf(vec.data(), sycl::range<1>(vec.size()));                           //CELL 中心
-    sycl::buffer<double, 1> cellVertexAttr_buf(attr_CtoV_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size() * mTotalZTopLayer));        //CELL 顶点ZTOP （要求的）
+    sycl::buffer<double, 1> cellCenterAttr_buf(vec.data(), sycl::range<1>(vec.size()));                           //CELL center
+    sycl::buffer<double, 1> cellVertexAttr_buf(attr_CtoV_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size() * mTotalZTopLayer));        //CELL vertex ZTOP (required)
   
     sycl::buffer<size_t, 1> grid_info_buf(grid_info_vec.data(), sycl::range<1>(grid_info_vec.size())); 
 
@@ -685,29 +692,29 @@ void MPASOSolution::calcCellCenterToVertex(const std::string& name, const std::v
             const int NEIGHBOR_NUM = 3;
             const int TOTAY_ZTOP_LAYER = acc_grid_info_buf[4];
             const int VERTLEVELS = acc_grid_info_buf[4];
-            // 1. 找出这个cell 的所有顶点 不存在的置为nan
+            // 1. Find all vertices of this cell, set non-existent ones to nan
             
-            // 1.1 计算这个CELL 有多少个顶点
+            // 1.1 Calculate how many vertices this CELL has
             auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
             auto nan = std::numeric_limits<size_t>::max();
-            // 1.2 找出所有候选顶点
+            // 1.2 Find all candidate vertices
             size_t current_cell_vertices_idx[MAX_VERTEX_NUM];
             SYCLKernel::GetCellVerticesIdx(cell_id, current_cell_vertices_number, current_cell_vertices_idx, MAX_VERTEX_NUM, max_edge, acc_verticesOnCell_buf);
-            // =============================== 找到max_edges个顶点
+            // =============================== Find max_edges vertices
             double current_cell_vertices_value[MAX_VERTEX_NUM];
             bool bBoundary = false;
             for (auto k = 0; k < MAX_VERTEX_NUM; ++k)
             {
                 auto vertex_idx = current_cell_vertices_idx[k];
-                // 2.1 如果是nan 跳过
+                // 2.1 If it is nan, skip
                 if (vertex_idx == nan) { current_cell_vertices_value[k] = std::numeric_limits<double>::quiet_NaN(); continue; }
                 auto current_vertex = acc_vertexCoord_buf[vertex_idx];
-                // 2.2 如果不是nan 找到含有这个顶点的3个cell id(候选) **边界情况没有3个**
+                // 2.2 If it is not nan, find the 3 cell ids containing this vertex (candidates) **Boundary cases may not have 3**
                 size_t tmp_cell_id[3];
                 tmp_cell_id[0] = acc_cellsOnVertex_buf[3 * vertex_idx + 0] - 1;
                 tmp_cell_id[1] = acc_cellsOnVertex_buf[3 * vertex_idx + 1] - 1;
                 tmp_cell_id[2] = acc_cellsOnVertex_buf[3 * vertex_idx + 2] - 1;
-                // 2.3 找到这3个CELL 的中心attribute value
+                // 2.3 Find the center attribute value of these 3 CELLS
                 double tmp_cell_center_attr[3];
                 for (auto tmp_cell = 0; tmp_cell < NEIGHBOR_NUM; tmp_cell++)
                 {
@@ -726,7 +733,7 @@ void MPASOSolution::calcCellCenterToVertex(const std::string& name, const std::v
                         tmp_cell_center_attr[tmp_cell] = attr;
                     }
                 }
-                // 2.4 如果是边界点
+                // 2.4 If it is a boundary point
                 if (bBoundary)
                 {
                     current_cell_vertices_value[k] = 0.0 * tmp_cell_center_attr[0] + 0.0 * tmp_cell_center_attr[1] + 0.0 * tmp_cell_center_attr[2];
@@ -752,7 +759,7 @@ void MPASOSolution::calcCellCenterToVertex(const std::string& name, const std::v
     // auto host_accessor = cellVertexZTop_buf.get_access<sycl::access::mode::read>();
     auto host_accessor = cellVertexAttr_buf.get_host_access(sycl::read_only);
     auto range = host_accessor.get_range();
-    size_t acc_length = range.size(); // 获取缓冲区的总大小
+    size_t acc_length = range.size(); // Get the total size of the buffer
 
     // std::cout << "acc_cellVertexZTop_buf.size() = " << cellVertexZTop_vec.size() << " " << acc_length << std::endl;
     // std::cout << "mVerticesSize x nVertLevels = " << grid->mVertexSize * mVertLevels << std::endl;
@@ -795,14 +802,14 @@ void MPASOSolution::calcCellCenterVelocity(MPASOGrid* grid, std::string& dataDir
     grid_info_vec.push_back(grid->mVertLevelsP1);
 
 #if USE_SYCL
-    sycl::buffer<vec3, 1> vertexCoord_buf(grid->vertexCoord_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size())); // CELL 顶点坐标
-    sycl::buffer<vec3, 1> cellCoord_buf(grid->cellCoord_vec.data(), sycl::range<1>(grid->cellCoord_vec.size()));       // CELL 中心坐标
-    sycl::buffer<vec3, 1> edgeCoord_buf(grid->edgeCoord_vec.data(), sycl::range<1>(grid->edgeCoord_vec.size()));       // EDGE 中心坐标
+    sycl::buffer<vec3, 1> vertexCoord_buf(grid->vertexCoord_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size())); // CELL Vertex coordinates
+    sycl::buffer<vec3, 1> cellCoord_buf(grid->cellCoord_vec.data(), sycl::range<1>(grid->cellCoord_vec.size()));       // CELL center coordinates
+    sycl::buffer<vec3, 1> edgeCoord_buf(grid->edgeCoord_vec.data(), sycl::range<1>(grid->edgeCoord_vec.size()));       // EDGE center coordinates
 
-    sycl::buffer<size_t, 1> numberVertexOnCell_buf(grid->numberVertexOnCell_vec.data(), sycl::range<1>(grid->numberVertexOnCell_vec.size()));   // CELL 有几个顶点
-    sycl::buffer<size_t, 1> edgesOnCell_buf(grid->edgesOnCell_vec.data(), sycl::range<1>(grid->edgesOnCell_vec.size()));                        // CELL 边ID
-    sycl::buffer<size_t, 1> cellsOnEdge_buf(grid->cellsOnEdge_vec.data(), sycl::range<1>(grid->cellsOnEdge_vec.size()));                        // EDGE CELLID
-    sycl::buffer<size_t, 1> verticesOnEdge_buf(grid->verticesOnEdge_vec.data(), sycl::range<1>(grid->verticesOnEdge_vec.size()));               // EDGE 顶点ID
+    sycl::buffer<size_t, 1> numberVertexOnCell_buf(grid->numberVertexOnCell_vec.data(), sycl::range<1>(grid->numberVertexOnCell_vec.size()));   // Number of vertices on CELL
+    sycl::buffer<size_t, 1> edgesOnCell_buf(grid->edgesOnCell_vec.data(), sycl::range<1>(grid->edgesOnCell_vec.size()));                        // CELL edge IDs
+    sycl::buffer<size_t, 1> cellsOnEdge_buf(grid->cellsOnEdge_vec.data(), sycl::range<1>(grid->cellsOnEdge_vec.size()));                        // EDGE cell IDs
+    sycl::buffer<size_t, 1> verticesOnEdge_buf(grid->verticesOnEdge_vec.data(), sycl::range<1>(grid->verticesOnEdge_vec.size()));               // EDGE vertex IDs
 
     sycl::buffer<double, 1> cellNormalVelocity_buf(cellNormalVelocity_vec.data(), sycl::range<1>(cellNormalVelocity_vec.size()));               // EDGE Normal Velocity
     sycl::buffer<vec3, 1> cellCenterVelocity_buf(cellCenterVelocity_vec.data(), sycl::range<1>(cellCenterVelocity_vec.size()));                 // CELL Center Velocity
@@ -828,26 +835,26 @@ void MPASOSolution::calcCellCenterVelocity(MPASOGrid* grid, std::string& dataDir
 
             auto cell_id = j;
             auto current_layer = i;
-            //4062533
+
             const int CELL_SIZE = acc_grid_info_buf[0];
             const int max_edge = acc_grid_info_buf[2];
             const int MAX_VERTEX_NUM = 7;
             const int NEIGHBOR_NUM = 3;
             const int TOTAY_ZTOP_LAYER = acc_grid_info_buf[4];
             const int VERTLEVELS = acc_grid_info_buf[4];
-            // 1. 根据cell_id 找到cell position
+            // 1. Find the cell position based on cell_id
             vec3 cell_center_velocity = { 0.0, 0.0, 0.0 };
             vec3 cell_position = acc_cellCoord_buf[cell_id];
             double total_length = 0.0;
             double edge_length = 0.0;
-            // 2. 根据cell_id 找到所有edge_id(候选7个)
+            // 2. Find all edge_ids based on cell_id 
             size_t current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
             size_t current_cell_edges_id[MAX_VERTEX_NUM];
             for (auto k = 0; k < current_cell_vertices_number; ++k)
             {
                 current_cell_edges_id[k] = acc_edgesOnCell_buf[cell_id * MAX_VERTEX_NUM + k] -1;
             }
-            // 2.1 将不存在的edge_id 设置为nan
+            // 2.1 Set non-existent edge_id to nan
             auto nan = std::numeric_limits<size_t>::max();
             for (auto k = current_cell_vertices_number; k < MAX_VERTEX_NUM; ++k)
             {
@@ -855,40 +862,40 @@ void MPASOSolution::calcCellCenterVelocity(MPASOGrid* grid, std::string& dataDir
             }
             
 
-            // 计算出planeBasisVector
+            // Calculate planeBasisVector
             vec3 eZonal; vec3 eMeridional;
 
-            vec3 up = cell_position / YOSEF_LENGTH(cell_position); // 单位 up 向量
+            vec3 up = cell_position / YOSEF_LENGTH(cell_position); // Unit up vector
 
-            // 选取全局 z 轴作为参考
+            // Select the global z-axis as a reference
             vec3 k = vec3(0.0, 0.0, 1.0);
             vec3 east = YOSEF_CROSS(k, up);
             if (YOSEF_LENGTH(east) < 1e-6) {
-                // 如果 cell_center 接近极点，换一个参考向量，例如 (0,1,0)
+                // If cell_center is near the pole, use a different reference vector, e.g., (0,1,0)
                 east = YOSEF_CROSS(vec3(0.0, 1.0, 0.0), up);
             }
-            east = east / YOSEF_LENGTH(east); // 单位 east 向量
+            east = east / YOSEF_LENGTH(east); // Unit east vector
 
-            vec3 north = YOSEF_CROSS(up, east); // 自动归一化（如果 up,east 已归一化
+            vec3 north = YOSEF_CROSS(up, east); // normalized (if up and east are normalized)
 
             //GeoConverter::convertXYZPositionToENUUnitVectory(cell_position, eZonal, eMeridional);
             double planeBasisVector[2][3] = { {east.x(), east.y(), east.z()}, {north.x(), north.y(), north.z()} };
-            // 计算出 alpha
+            // Calculate alpha
             double cellCenter[3] = { cell_position.x(), cell_position.y(), cell_position.z() };
             int pointCount = MAX_VERTEX_NUM; 
             double edge_center[MAX_VERTEX_NUM][3];
             double unit_vector[MAX_VERTEX_NUM][3];
             double noraml_vel[MAX_VERTEX_NUM][1];
             double coeffs[MAX_VERTEX_NUM][3] = {{0.0}};
-            // 3. 遍历 -》 计算每条边的矢量速度
+            // 3. Iterate - Calculate the vector velocity for each edge
             for (auto k = 0; k < MAX_VERTEX_NUM; ++k)
             {
                 auto edge_id = current_cell_edges_id[k];
-                if (edge_id == nan) { continue; } // TODO 考虑最后除法是否会有多计算一次
-                // 3.1 找到边的中心位置
+                if (edge_id == nan) { continue; } 
+                // 3.1 Find the center position of the edge
                 vec3 edge_position = acc_edgeCoord_buf[edge_id];
                 edge_center[k][0] = edge_position.x(); edge_center[k][1] = edge_position.y(); edge_center[k][2] = edge_position.z();
-                // 3.2 找到边的 normal vector
+                // 3.2 Find the normal vector of the edge
                 size_t tmp_cell_id[2];
                 tmp_cell_id[0] = acc_cellsOnEdge_buf[edge_id * 2.0f + 0] - 1;
                 tmp_cell_id[1] = acc_cellsOnEdge_buf[edge_id * 2.0f + 1] - 1;
@@ -909,22 +916,22 @@ void MPASOSolution::calcCellCenterVelocity(MPASOGrid* grid, std::string& dataDir
                 {
                     vec3 min_cell_position = acc_cellCoord_buf[min_cell_id];
                     vec3 max_cell_position = acc_cellCoord_buf[max_cell_id];
-                    // 3.2 方法一 两个cell的中心位置的差
+                    // 3.2 Method 1: Difference between the centers of the two cells
                     normal_vector = max_cell_position - min_cell_position;
                     length = YOSEF_LENGTH(normal_vector);
                     if (length == 0.0) { continue; }
                     normal_vector /= length;
                 }
-                // 3.3 找到边的 normal velocity 
+                // 3.3 Find the normal velocity of the edge
                 auto normal_velocity = acc_cellNormalVelocity_buf[edge_id * TOTAY_ZTOP_LAYER + current_layer];
                 noraml_vel[k][0] = normal_velocity;
-                // 3.4 找到边的normal
+                // 3.4 Find the normal of the edge
                 unit_vector[k][0] = normal_vector.x() ; 
                 unit_vector[k][1] = normal_vector.y() ; 
                 unit_vector[k][2] = normal_vector.z() ;
                 
                
-                // // 计算边的权重 
+                // // Calculate the weights of the edges 
                 // size_t vertices_idx_on_edge[2];
                 // vertices_idx_on_edge[0] = acc_verticesOnEdge_buf[edge_id * 2.0f + 0] - 1;
                 // vertices_idx_on_edge[1] = acc_verticesOnEdge_buf[edge_id * 2.0f + 1] - 1;
@@ -943,7 +950,7 @@ void MPASOSolution::calcCellCenterVelocity(MPASOGrid* grid, std::string& dataDir
                 // current_edge_velocity.z() = normal_velocity * normal_vector.z() * edge_length;
             }
 
-            // 计算alpha 
+            // Calculate alpha
             double alpha = Interpolator::compute_alpha(edge_center, pointCount, cellCenter);
             alpha = 1.0;
             // out << "alpha = " << alpha << sycl::endl;
@@ -963,7 +970,7 @@ void MPASOSolution::calcCellCenterVelocity(MPASOGrid* grid, std::string& dataDir
             }
             
             // out << "xVel = " << xVel << " yVel = " << yVel << " zVel = " << zVel << sycl::endl;
-            // 4. 平均
+            // 4. average
             // cell_center_velocity /= static_cast<double>(current_cell_vertices_number);
             // cell_center_velocity *= 2.0;
             // cell_center_velocity /= total_length;
@@ -978,7 +985,7 @@ void MPASOSolution::calcCellCenterVelocity(MPASOGrid* grid, std::string& dataDir
     // auto host_accessor = cellCenterVelocity_buf.get_access<sycl::access::mode::read>();
     auto host_accessor = cellCenterVelocity_buf.get_host_access(sycl::read_only);
     auto range = host_accessor.get_range();
-    size_t acc_length = range.size(); // 获取缓冲区的总大小
+    size_t acc_length = range.size(); // Get the total size of the buffer
 
     // std::cout << "cellCenterVelocity_buf.size() = " << cellCenterVelocity_vec.size() << " " << acc_length << std::endl;
     // std::cout << "mCellSize x nVertLevels = " << grid->mCellsSize * mVertLevels << std::endl;
@@ -1017,19 +1024,18 @@ void MPASOSolution::calcCellCenterVelocityByZM(MPASOGrid *grid, std::string& dat
     grid_info_vec.push_back(grid->mVertLevelsP1);
 
 #if USE_SYCL
-    sycl::buffer<vec3, 1> vertexCoord_buf(grid->vertexCoord_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size())); // CELL 顶点坐标
-    sycl::buffer<vec3, 1> cellCoord_buf(grid->cellCoord_vec.data(), sycl::range<1>(grid->cellCoord_vec.size()));       // CELL 中心坐标
-    sycl::buffer<vec3, 1> edgeCoord_buf(grid->edgeCoord_vec.data(), sycl::range<1>(grid->edgeCoord_vec.size()));       // EDGE 中心坐标
+    sycl::buffer<vec3, 1> vertexCoord_buf(grid->vertexCoord_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size())); // CELL vertex coordinate
+    sycl::buffer<vec3, 1> cellCoord_buf(grid->cellCoord_vec.data(), sycl::range<1>(grid->cellCoord_vec.size()));       // CELL center coordinate
+    sycl::buffer<vec3, 1> edgeCoord_buf(grid->edgeCoord_vec.data(), sycl::range<1>(grid->edgeCoord_vec.size()));       // EDGE center coordinate
 
-    sycl::buffer<size_t, 1> numberVertexOnCell_buf(grid->numberVertexOnCell_vec.data(), sycl::range<1>(grid->numberVertexOnCell_vec.size())); // CELL 有几个顶点
-    sycl::buffer<size_t, 1> edgesOnCell_buf(grid->edgesOnCell_vec.data(), sycl::range<1>(grid->edgesOnCell_vec.size()));                       // CELL 边ID
-    sycl::buffer<size_t, 1> cellsOnEdge_buf(grid->cellsOnEdge_vec.data(), sycl::range<1>(grid->cellsOnEdge_vec.size()));                       // EDGE 细胞ID
-    sycl::buffer<size_t, 1> verticesOnEdge_buf(grid->verticesOnEdge_vec.data(), sycl::range<1>(grid->verticesOnEdge_vec.size()));               // EDGE 顶点ID
+    sycl::buffer<size_t, 1> numberVertexOnCell_buf(grid->numberVertexOnCell_vec.data(), sycl::range<1>(grid->numberVertexOnCell_vec.size())); // Number of vertices on CELL
+    sycl::buffer<size_t, 1> edgesOnCell_buf(grid->edgesOnCell_vec.data(), sycl::range<1>(grid->edgesOnCell_vec.size()));                       // CELL edge IDs
+    sycl::buffer<size_t, 1> cellsOnEdge_buf(grid->cellsOnEdge_vec.data(), sycl::range<1>(grid->cellsOnEdge_vec.size()));                       // EDGE cell IDs
+    sycl::buffer<size_t, 1> verticesOnEdge_buf(grid->verticesOnEdge_vec.data(), sycl::range<1>(grid->verticesOnEdge_vec.size()));               // EDGE vertex IDs
 
     sycl::buffer<double, 1> cellZonalVelocity_buf(cellZonalVelocity_vec.data(), sycl::range<1>(cellZonalVelocity_vec.size()));            
     sycl::buffer<double, 1> cellMeridionalVelocity_buf(cellMeridionalVelocity_vec.data(), sycl::range<1>(cellMeridionalVelocity_vec.size()));
-    sycl::buffer<vec3, 1> cellCenterVelocity_buf(cellCenterVelocity_vec.data(), sycl::range<1>(cellCenterVelocity_vec.size()));        // CELL 中心速度
-
+    sycl::buffer<vec3, 1> cellCenterVelocity_buf(cellCenterVelocity_vec.data(), sycl::range<1>(cellCenterVelocity_vec.size()));        // CELL center velocity
     sycl::buffer<size_t, 1> grid_info_buf(grid_info_vec.data(), sycl::range<1>(grid_info_vec.size())); 
 
     q.submit([&](sycl::handler& cgh) {
@@ -1057,10 +1063,10 @@ void MPASOSolution::calcCellCenterVelocityByZM(MPASOGrid *grid, std::string& dat
             const int max_edge = acc_grid_info_buf[2];
             const int TOTAY_ZTOP_LAYER = acc_grid_info_buf[4];
             const int VERTLEVELS = acc_grid_info_buf[4];
-            // 1. 根据cell_id 找到cell position
+            // 1. Find cell position based on cell_id
             vec3 cell_center_velocity = { 0.0, 0.0, 0.0 };
             vec3 cell_position = acc_cellCoord_buf[cell_id];
-            // 2. 根据(cell_id , current_layer) -> zonal velocity and meridional velocity
+            // 2. Based on (cell_id , current_layer) -> zonal velocity and meridional velocity
             double tmp_zonal = acc_cellZonalVelocity_buf[cell_id * TOTAY_ZTOP_LAYER + current_layer];
             double tmp_mer = acc_cellMeridionalVelocity_buf[cell_id * TOTAY_ZTOP_LAYER + current_layer];   
             GeoConverter::convertENUVelocityToXYZ(cell_position, tmp_zonal, tmp_mer, 0.0, cell_center_velocity);
@@ -1108,14 +1114,14 @@ void MPASOSolution::calcCellVertexVelocityByZM(MPASOGrid *grid, std::string& dat
     grid_info_vec.push_back(grid->mVertLevelsP1);
 
 #if USE_SYCL
-    sycl::buffer<vec3, 1> vertexCoord_buf(grid->vertexCoord_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size())); // CELL 顶点坐标
-    sycl::buffer<vec3, 1> cellCoord_buf(grid->cellCoord_vec.data(), sycl::range<1>(grid->cellCoord_vec.size()));       // CELL 中心坐标
-    
-    sycl::buffer<size_t, 1> numberVertexOnCell_buf(grid->numberVertexOnCell_vec.data(), sycl::range<1>(grid->numberVertexOnCell_vec.size())); // CELL 有几个顶点
-    
+    sycl::buffer<vec3, 1> vertexCoord_buf(grid->vertexCoord_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size())); // CELL vertex coordinate
+    sycl::buffer<vec3, 1> cellCoord_buf(grid->cellCoord_vec.data(), sycl::range<1>(grid->cellCoord_vec.size()));       // CELL center coordinate
+
+    sycl::buffer<size_t, 1> numberVertexOnCell_buf(grid->numberVertexOnCell_vec.data(), sycl::range<1>(grid->numberVertexOnCell_vec.size())); // Number of vertices on CELL
+
     sycl::buffer<double, 1> cellZonalVelocity_buf(cellVertexZonalVelocity_vec.data(), sycl::range<1>(cellVertexZonalVelocity_vec.size()));            
     sycl::buffer<double, 1> cellMeridionalVelocity_buf(cellVertexMeridionalVelocity_vec.data(), sycl::range<1>(cellVertexMeridionalVelocity_vec.size()));
-    sycl::buffer<vec3, 1> cellVertexVelocity_buf(cellVertexVelocity_vec.data(), sycl::range<1>(cellVertexVelocity_vec.size()));        // CELL 顶点速度
+    sycl::buffer<vec3, 1> cellVertexVelocity_buf(cellVertexVelocity_vec.data(), sycl::range<1>(cellVertexVelocity_vec.size()));        // CELL vertex velocity
 
     sycl::buffer<size_t, 1> grid_info_buf(grid_info_vec.data(), sycl::range<1>(grid_info_vec.size())); 
 
@@ -1139,10 +1145,10 @@ void MPASOSolution::calcCellVertexVelocityByZM(MPASOGrid *grid, std::string& dat
             const int max_edge = acc_grid_info_buf[2];
             const int TOTAY_ZTOP_LAYER = acc_grid_info_buf[4];
             const int VERTLEVELS = acc_grid_info_buf[4];
-            // 1. 根据vertex_id 找到vertex position
+            // 1. Base on vertex_id to find vertex position
             vec3 vertex_center_velocity = { 0.0, 0.0, 0.0 };
             vec3 vertex_position = acc_vertexCoord_buf[vertex_id];
-            // 2. 根据(vertex_id , current_layer) -> zonal velocity and meridional velocity
+            // 2. Based on (vertex_id , current_layer) -> zonal velocity and meridional velocity
             double tmp_zonal = acc_cellZonalVelocity_buf[vertex_id * TOTAY_ZTOP_LAYER + current_layer];
             double tmp_mer = acc_cellMeridionalVelocity_buf[vertex_id * TOTAY_ZTOP_LAYER + current_layer];
             GeoConverter::convertENUVelocityToXYZ(vertex_position, tmp_zonal, tmp_mer, 0.0, vertex_center_velocity);
@@ -1190,15 +1196,15 @@ void MPASOSolution::calcCellVertexVelocity(MPASOGrid* grid, std::string& dataDir
     grid_info_vec.push_back(grid->mVertLevelsP1);
 
 #if USE_SYCL
-    sycl::buffer<vec3, 1> vertexCoord_buf(grid->vertexCoord_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size())); // CELL 顶点坐标
-    sycl::buffer<vec3, 1> cellCoord_buf(grid->cellCoord_vec.data(), sycl::range<1>(grid->cellCoord_vec.size()));       // CELL 中心坐标
+    sycl::buffer<vec3, 1> vertexCoord_buf(grid->vertexCoord_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size())); // CELL vertex coordinate
+    sycl::buffer<vec3, 1> cellCoord_buf(grid->cellCoord_vec.data(), sycl::range<1>(grid->cellCoord_vec.size()));       // CELL center coordinate
 
-    sycl::buffer<size_t, 1> numberVertexOnCell_buf(grid->numberVertexOnCell_vec.data(), sycl::range<1>(grid->numberVertexOnCell_vec.size())); // CELL 有几个顶点
+    sycl::buffer<size_t, 1> numberVertexOnCell_buf(grid->numberVertexOnCell_vec.data(), sycl::range<1>(grid->numberVertexOnCell_vec.size())); // Number of vertices on CELL
     sycl::buffer<size_t, 1> verticesOnCell_buf(grid->verticesOnCell_vec.data(), sycl::range<1>(grid->verticesOnCell_vec.size()));             // 
     sycl::buffer<size_t, 1> cellsOnVertex_buf(grid->cellsOnVertex_vec.data(), sycl::range<1>(grid->cellsOnVertex_vec.size()));
 
-    sycl::buffer<vec3, 1> cellCenterVelocity_buf(cellCenterVelocity_vec.data(), sycl::range<1>(cellCenterVelocity_vec.size()));                           //CELL 中心ZTOP
-    sycl::buffer<vec3, 1> cellVertexVelocity_buf(cellVertexVelocity_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size() * mTotalZTopLayer));        //CELL 顶点ZTOP （要求的）
+    sycl::buffer<vec3, 1> cellCenterVelocity_buf(cellCenterVelocity_vec.data(), sycl::range<1>(cellCenterVelocity_vec.size()));                           //CELL center ZTOP
+    sycl::buffer<vec3, 1> cellVertexVelocity_buf(cellVertexVelocity_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size() * mTotalZTopLayer));        //CELL vertex ZTOP (wanan to calculate)
 
     sycl::buffer<size_t, 1> grid_info_buf(grid_info_vec.data(), sycl::range<1>(grid_info_vec.size())); 
 
@@ -1226,21 +1232,21 @@ void MPASOSolution::calcCellVertexVelocity(MPASOGrid* grid, std::string& dataDir
             const int NEIGHBOR_NUM = 3;
             const int TOTAY_ZTOP_LAYER = acc_grid_info_buf[4];
             const int VERTLEVELS = acc_grid_info_buf[4];
-            // 1. 找出这个cell 的所有顶点 不存在的置为nan
+            // 1. Find all vertices of this cell, set to nan if not exist
 
-            // 1.1 计算这个CELL 有多少个顶点
+            // 1.1 Calculate how many vertices this CELL has
             auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
             auto nan = std::numeric_limits<size_t>::max();
-            // 1.2 找出所有候选顶点
+            // 1.2 Find all candidate vertices
             size_t current_cell_vertices_idx[MAX_VERTEX_NUM];
             SYCLKernel::GetCellVerticesIdx(cell_id, current_cell_vertices_number, current_cell_vertices_idx, MAX_VERTEX_NUM, max_edge, acc_verticesOnCell_buf);
-            // =============================== 找到max_edge个顶点
+            // =============================== Find max_edge vertices ===============================
             vec3 current_cell_vertices_value[MAX_VERTEX_NUM];
             bool bBoundary = false;
             for (auto k = 0; k < MAX_VERTEX_NUM; ++k)
             {
                 auto vertex_idx = current_cell_vertices_idx[k];
-                // 2.1 如果是nan 跳过
+                // 2.1 If it is nan, skip
                 if (vertex_idx == nan)
                 {
                     auto double_nan = std::numeric_limits<double>::quiet_NaN();
@@ -1248,12 +1254,12 @@ void MPASOSolution::calcCellVertexVelocity(MPASOGrid* grid, std::string& dataDir
                     continue; 
                 }
                 auto current_vertex = acc_vertexCoord_buf[vertex_idx];
-                // 2.2 如果不是nan 找到含有这个顶点的3个cell id(候选) 边界情况没有3个
+                // 2.2 If it is not nan, find the 3 cell ids (candidates) containing this vertex; boundary cases may have fewer than 3
                 size_t tmp_cell_id[3];
                 tmp_cell_id[0] = acc_cellsOnVertex_buf[3 * vertex_idx + 0] - 1;
                 tmp_cell_id[1] = acc_cellsOnVertex_buf[3 * vertex_idx + 1] - 1;
                 tmp_cell_id[2] = acc_cellsOnVertex_buf[3 * vertex_idx + 2] - 1;
-                // 2.3 找到这3个CELL 的中心Velocity
+                // 2.3 Find the center velocities of these 3 cells
                 vec3 tmp_cell_center_vels[3];
                 for (auto tmp_cell = 0; tmp_cell < NEIGHBOR_NUM; tmp_cell++)
                 {
@@ -1273,7 +1279,7 @@ void MPASOSolution::calcCellVertexVelocity(MPASOGrid* grid, std::string& dataDir
                     }
                 }
                
-                // 2.4 如果是边界点
+                // 2.4 If it's a boundary point
                 if (bBoundary)
                 {
                     current_cell_vertices_value[k] = 0.0 * tmp_cell_center_vels[0] + 0.0 * tmp_cell_center_vels[1] + 0.0 * tmp_cell_center_vels[2];
@@ -1296,7 +1302,7 @@ void MPASOSolution::calcCellVertexVelocity(MPASOGrid* grid, std::string& dataDir
     q.wait_and_throw();
     auto host_accessor = cellVertexVelocity_buf.get_host_access(sycl::read_only);
     auto range = host_accessor.get_range();
-    size_t acc_length = range.size(); // 获取缓冲区的总大小
+    size_t acc_length = range.size(); 
     writeVertexZTopToFile<vec3>(cellVertexVelocity_vec, cell_vertex_velocity_path);
     Debug("[MPASOSolution]::Calc Cell cellVertexVelocity_vec  = \t [ %d ] \t type = [ float64 float64 float64]", 
             cellVertexVelocity_vec.size());
@@ -1392,7 +1398,7 @@ void MPASOSolution::copyFromNdarray_Double(ftk::ndarray_group* g, std::string va
         // std::cout << "tmp_get = " << tmp_get.get() << std::endl;
         //  std::cout << "Actual type of tmp_get: " << typeid(*tmp_get).name() << std::endl;
         auto tmp_ptr_float = std::dynamic_pointer_cast<ftk::ndarray<float>>(g->get(value));
-        if (tmp_ptr_float) // 检查转换是否成功
+        if (tmp_ptr_float) 
         {
 
             // std::cout << "tmp_ptr = " << tmp_ptr.get() << std::endl;
@@ -1437,7 +1443,7 @@ void MPASOSolution::copyFromNdarray_Char(ftk::ndarray_group* g, std::string valu
         std::cout << "====== " << value << " found [\u2713]" << std::endl;
         auto tmp_get = g->get(value);
         auto tmp_ptr = std::dynamic_pointer_cast<ftk::ndarray<char>>(g->get(value));
-        if (tmp_ptr) // 检查转换是否成功
+        if (tmp_ptr) 
         {
             auto tmp_vec = tmp_ptr->std_vector();
             vec.resize(tmp_vec.size());
@@ -1468,7 +1474,7 @@ void MPASOSolution::copyFromNdarray_Float(ftk::ndarray_group* g, std::string val
         auto tmp_get = g->get(value);
        
         auto tmp_ptr = std::dynamic_pointer_cast<ftk::ndarray<float>>(g->get(value));
-        if (tmp_ptr) // 检查转换是否成功
+        if (tmp_ptr) 
         {
 
             // std::cout << "tmp_ptr = " << tmp_ptr.get() << std::endl;

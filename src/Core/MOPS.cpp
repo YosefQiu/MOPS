@@ -1,5 +1,6 @@
 #include "api/MOPS.h"
 #include "Core/MOPSApp.h"
+#include <memory>
 
 
 namespace MOPS 
@@ -15,9 +16,9 @@ namespace MOPS
         app.addGrid(grid);
     }
 
-    void MOPS_AddAttribute(int timestep, std::shared_ptr<MPASOSolution> sol)
+    void MOPS_AddAttribute(int solID, std::shared_ptr<MPASOSolution> sol)
     {
-        app.addSol(timestep, sol);
+        app.addSol(solID, sol);
     }
 
     void MOPS_Begin()
@@ -61,9 +62,9 @@ namespace MOPS
         return lines;
     }
 
-    std::vector<TrajectoryLine> MOPS_RunPathLine(TrajectorySettings* config, std::vector<CartesianCoord>& sample_points, std::vector<int>& timestep_vec)
+    std::vector<TrajectoryLine> MOPS_RunPathLine(TrajectorySettings* config, std::vector<CartesianCoord>& sample_points)
     {
-        auto lines = app.runPathLine(config, sample_points, timestep_vec);
+        auto lines = app.runPathLine(config, sample_points);
         return lines;
     }
 
@@ -76,7 +77,10 @@ namespace MOPS
     }
     
 
-    
+    std::shared_ptr<MPASOField> MOPS_GetFieldSnapshots()
+    {
+        return app.getField();
+    }
    
 
 }

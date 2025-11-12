@@ -52,12 +52,12 @@ namespace MOPS
      * This function reads the velocity fields from NetCDF files and initializes
      * associated cell-centered and vertex-based quantities.
      *
-     * @param config The configuration containing current timestep (in-place mutable).
-     *        - `config.timestep`: The timestep for which the solution is extracted.
+     * @param config The configuration containing current solID (in-place mutable).
+     *        - `config.solID`: The solID for which the solution is extracted.
      *
      * Must be called after `MOPS_AddGrid()` and before `MOPS_End()`.
      */
-    void MOPS_AddAttribute(int timestep, std::shared_ptr<MPASOSolution> sol);
+    void MOPS_AddAttribute(int solID, std::shared_ptr<MPASOSolution> sol);
 
     /**
      * @brief Finalize the ingestion stage and build simulation fields.
@@ -99,7 +99,7 @@ namespace MOPS
     std::vector<TrajectoryLine> MOPS_RunStreamLine(TrajectorySettings* config, std::vector<CartesianCoord>& sample_points);
     
 
-    std::vector<TrajectoryLine> MOPS_RunPathLine(TrajectorySettings* config, std::vector<CartesianCoord>& sample_points, std::vector<int>& timestep_vec);
+    std::vector<TrajectoryLine> MOPS_RunPathLine(TrajectorySettings* config, std::vector<CartesianCoord>& sample_points);
 
     /**
      * @brief Generate sample points used for trajectory or probing tasks.
@@ -110,5 +110,8 @@ namespace MOPS
      * @param config Sampling domain settings (region, resolution, etc.).
      */
     void MOPS_GenerateSamplePoints(SamplingSettings* config, std::vector<CartesianCoord>& sample_points);
+
+
+    std::shared_ptr<MPASOField> MOPS_GetFieldSnapshots();
 
 }

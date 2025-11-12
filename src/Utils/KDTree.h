@@ -94,18 +94,16 @@ namespace MOPS
 
 
     extern int split_node;
-    //kd树的node
+    // KDTree node
     struct Node {
 
         float point[3];
         int index;
-        // 运算符重载
         bool operator<(const Node& n)const {
             return point[split_node] < n.point[split_node];
         }
 
     };
-    // 自定义pair，cuda c不支持STL
     struct Pair_my {
         int id;
         float dis;
@@ -115,7 +113,7 @@ namespace MOPS
         }
     };
 
-    // 自定义stack，cuda c不支持STL
+    // 
     struct Stack_my
     {
         int first;
@@ -128,50 +126,43 @@ namespace MOPS
 
     public:
 
-        kdtreegpu(int max_node_num, int max_neighbor_num, int query_num, int dim, sycl::queue& q_ct1, std::vector<vec3f>& points); //构造函数
-        void build(); // 建树
-        int query_gpu(float* query_points); // GPU上查询
-        void query_one(int left, int right, int id); //CPU上查询一个点
-        int query_cpu_and_check(); // 此为验证函数，验证CPU版本的kd树和GPU版本的kd树查询结果是否一致
+        kdtreegpu(int max_node_num, int max_neighbor_num, int query_num, int dim, sycl::queue& q_ct1, std::vector<vec3f>& points); 
+        void build(); 
+        int query_gpu(float* query_points); 
+        void query_one(int left, int right, int id); 
+        int query_cpu_and_check(); 
         virtual ~kdtreegpu();
     public:
-        int kdtree_dim; // kd树维度
-        int kdtree_max_neighbor_num; // 最大最近邻个数
-        int kdtree_query_num; // 查询点的数目
-        int kdtree_node_num; // kd树节点数目
+        int kdtree_dim; 
+        int kdtree_max_neighbor_num; 
+        int kdtree_query_num; 
+        int kdtree_node_num; 
         int cnt;
 
-        int* split; // kd树分割点
-        Node* n;  // kd树节点
-        Pair_my* query_result; // 查询结果
-        float* query_node; // 查询节点
+        int* split; 
+        Node* n;  
+        Pair_my* query_result; 
+        float* query_node; 
 
-        std::stack<std::pair<int, int> > s; // 栈，用在CPU上建树
-        std::priority_queue< Pair_my > que; // 优先队列，CPU上查询的时候用到的
+        std::stack<std::pair<int, int> > s; 
+        std::priority_queue< Pair_my > que; 
         sycl::queue q;
     };
 
 
-
-
-    // 由于cuda c不支持stl，因此在查询kd的时候，实现了堆。push_gpu(), pop_gpu(), swap_gpu()
-    //这三个函数是gpu上堆的操作
-
-    //交换堆中的节点
     void swap_gpu(int id, int id1, int id2, Pair_my* query_result_gpu, int kdtree_max_neighbor_num);
 
 
-    // 在堆中插入节点
+
     void push_gpu(float dis_, int id_, int id, int* q_cur_id_gpu, Pair_my* query_result_gpu, int kdtree_max_neighbor_num);
 
-    // 弹出节点
     void pop_gpu(int id, int* q_cur_id_gpu, Pair_my* query_result_gpu, int kdtree_max_neighbor_num);
 
-    // gpu上查询一个节点，非递归查询
+  
     SYCL_EXTERNAL void query_one_gpu(int left, int right, int idx, int* split_gpu,
         float* query_node_gpu, Pair_my* query_result_gpu, Node* n_gpu, int* q_cur_id_gpu, int kdtree_max_neighbor_num, int kdtree_dim);
 
-    //gpu上并行查询kernel函数
+ 
     SYCL_EXTERNAL void query_all_gpu(int query_num, int* split_gpu,
         int* q_cur_id_gpu, float* query_node_gpu,
         Pair_my* query_result_gpu,
