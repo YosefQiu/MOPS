@@ -12,10 +12,11 @@
 ## 📦 Installation
 ### **1️⃣ Use CMake**
 ```bash
+# zsh
 cd $PSCRATCH
 git clone https://github.com/YosefQiu/MOPS.git
 cd MOPS
-./script/compile.sh
+source ./script/compile.sh
 ```
 ### **2️⃣ Use [Spack](https://github.com/spack/spack)** (will be update use a new repo)
 > ### 🔗  check [spack_test](https://github.com/YosefQiu/spack_test) for more details.
@@ -33,7 +34,7 @@ cd MOPS
 |-------------|----------------|
 | `MOPS`      | Parses input YAML and simulates MPAS-Ocean particle trajectories. |
 
-### **CLI Options**
+### **CLI Options (It will be updated. Please refer to the tutorial folder for specific usage.)**
 | **Option** | **Description** |
 |------------|----------------|
 | `-i, --input <file>` | **(Required)** Path to the input YAML configuration file. |

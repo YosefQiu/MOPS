@@ -6,6 +6,9 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import matplotlib.pyplot as plt
 
+import warnings
+import functools
+
 from matplotlib.collections import LineCollection
 from matplotlib.colors import Normalize
 from mpl_toolkits.mplot3d import Axes3D
@@ -14,11 +17,32 @@ from typing import List, Tuple, Dict
 print("Available API:", dir(pyMOPS))
 print("\n\n")
     
+def deprecated(reason: str = ""):
+    def decorator(cls_or_func):
+        msg = f"{cls_or_func.__name__} is deprecated."
+        if reason:
+            msg += f" {reason}"
+
+        if isinstance(cls_or_func, type):
+            orig_init = cls_or_func.__init__
+            @functools.wraps(orig_init)
+            def new_init(self, *args, **kwargs):
+                warnings.warn(msg, DeprecationWarning, stacklevel=2)
+                return orig_init(self, *args, **kwargs)
+            cls_or_func.__init__ = new_init
+            return cls_or_func
+
+        @functools.wraps(cls_or_func)
+        def wrapped(*args, **kwargs):
+            warnings.warn(msg, DeprecationWarning, stacklevel=2)
+            return cls_or_func(*args, **kwargs)
+        return wrapped
+    return decorator
 
 
 EARTH_RADIUS_M = 6_371_000.0
 
-def latlon_to_unit_xyz(lat_deg: np.ndarray, lon_deg: np.ndarray) -> np.ndarray:
+def lat_lon_to_unit_xyz(lat_deg: np.ndarray, lon_deg: np.ndarray) -> np.ndarray:
     """Return unit-length Cartesian directions for points on the sphere (sea surface)."""
     lat = np.deg2rad(lat_deg.astype(np.float64))
     lon = np.deg2rad(lon_deg.astype(np.float64))
@@ -54,13 +78,53 @@ def group_depths(depths: np.ndarray, tol_m: float = 1e-6) -> List[Tuple[float, n
     return groups
 
 
-def xyz_to_latlon(x, y, z):
+def xyz_to_lat_lon(x, y, z):
     r = np.sqrt(x**2 + y**2 + z**2)
     r = np.where(r < 1e-8, np.nan, r)
     lat = np.arcsin(z / r) * 180 / np.pi
     lon = np.arctan2(y, x) * 180 / np.pi
     return lat, lon
 
+def xyz_to_lat_lon_depth(x, y, z, R=EARTH_RADIUS_M):
+    """
+    Returns (lat_deg, lon_deg, depth_m)
+    depth positive downward, consistent with your C++.
+    """
+    lon = np.degrees(np.arctan2(y, x))
+    r = np.sqrt(x*x + y*y + z*z)
+    lat = np.degrees(np.arcsin(z / r))
+    depth = R - r
+    return lat, lon, depth
+
+def lat_lon_depth_to_xyz(lat_deg, lon_deg, depth, R=EARTH_RADIUS_M):
+    r = R - depth
+    lat = np.radians(lat_deg)
+    lon = np.radians(lon_deg)
+    x = r * np.cos(lat) * np.cos(lon)
+    y = r * np.cos(lat) * np.sin(lon)
+    z = r * np.sin(lat)
+    return np.array([x, y, z], dtype=float)
+
+def make_same_lat_depth_diff_lon(p_xyz, delta_lon_deg):
+    lat, lon, depth = xyz_to_lat_lon_depth(p_xyz[0], p_xyz[1], p_xyz[2])
+    lon = lon + delta_lon_deg
+    # wrap to [-180, 180]
+    if lon > 180.0:
+        lon -= 360.0
+    if lon < -180.0:
+        lon += 360.0
+    return lat_lon_depth_to_xyz(lat, lon, depth)
+
+def generate_points_from_anchor(anchor_xyz, n=15, lon_step_deg=2.0):
+    """
+    anchor_xyz: (3,)
+    returns pts: (n,3), where pts[0]=anchor and pts[i] shifts lon by lon_step_deg*i
+    """
+    pts = np.empty((n, 3), dtype=float)
+    pts[0] = np.asarray(anchor_xyz, dtype=float)
+    for i in range(1, n):
+        pts[i] = make_same_lat_depth_diff_lon(pts[0], lon_step_deg * i)
+    return pts
 
 def Vis_PathLines(
     trajectory_lines,
@@ -134,7 +198,7 @@ def Vis_PathLines(
         if P.shape[0] < 2:
             continue
 
-        lat, lon = xyz_to_latlon(P[:, 0], P[:, 1], P[:, 2])
+        lat, lon = xyz_to_lat_lon(P[:, 0], P[:, 1], P[:, 2])
         all_lats.extend(lat[np.isfinite(lat)])
         all_lons.extend(lon[np.isfinite(lon)])
 
@@ -158,17 +222,22 @@ def Vis_PathLines(
         if segs.shape[0] == 0:
             continue
 
-        if vals_seg is None:
-            # When there is no scalar, draw a white line
-            lc = LineCollection(segs, linewidths=linewidth, colors="white",
-                                transform=ccrs.PlateCarree())
+        if vals_seg is None or len(vals_seg) == 0:
+            lc = LineCollection(
+                segs,
+                linewidths=linewidth,
+                colors="white",
+                transform=ccrs.PlateCarree()
+            )
         else:
-            lc = LineCollection(segs, linewidths=linewidth, cmap=cmap,
-                                array=vals_seg, transform=ccrs.PlateCarree())
-            # Update the global scalar range
-            if vals_seg.size:
-                scal_min = min(scal_min, float(np.nanmin(vals_seg)))
-                scal_max = max(scal_max, float(np.nanmax(vals_seg)))
+            lc = LineCollection(
+                segs,
+                linewidths=linewidth,
+                cmap=cmap,
+                array=vals_seg,
+                transform=ccrs.PlateCarree()
+            )
+
 
         ax.add_collection(lc)
         lcs.append(lc)
@@ -215,6 +284,7 @@ def Vis_PathLines(
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.show()
 
+@deprecated("There may be bugs. Refer to MOPSPathline for a more reliable implementation.")
 class MOPSStreamline:
     """
     MOPSStreamline: a Python wrapper for single-timestep streamline tracing.
@@ -435,7 +505,7 @@ class MOPSPathline:
       1) init(device="gpu")
       2) set_time(sy, sm, ey, em, direction="forward")
       3) set_seed(depth, lat_range=(lat_min,lat_max), lon_range=(lon_min,lon_max),
-                  grid=(nx,ny), points=None, first_point=None, follow_last=True)
+                  grid=(nx,ny), points=None, follow_last=True)
       4) run(method="rk4", delta_minutes=1, record_every_minutes=6) -> list[dict]
     """
     def __init__(self, yaml_path: str):
@@ -445,10 +515,10 @@ class MOPSPathline:
         self.direction = "forward"
         self._seed_conf = None
         self._seed_points = None
-        self._first_point = None
         self._follow_last = True
+        self._first_round = True
         self._depth = None
-        self._last_pt = None  # (3,) np.ndarray
+        self._last_pt = None  # (N,3) np.ndarray, last point of each particle
         self._one_min = 60
 
         self._solA = pyMOPS.MPASOSolution()
@@ -537,18 +607,15 @@ class MOPSPathline:
         lon_range: tuple = None,
         grid: tuple = (2, 2),
         points: np.ndarray | list | None = None,   # directly provide (N,3) Cartesian coords
-        first_point: list | tuple | np.ndarray | None = None,
         follow_last: bool = True
     ):
         """
         Two usages:
         A) Give lat/lon + grid (internally use MOPS to generate sampling)
         B) Directly give the Cartesian coordinates of points (N,3)
-        first_point: If given, will override the first seed (e.g. single point tracking)
         follow_last: If True, the first seed will be replaced by the last point of the previous segment (default True)
         """
         self._depth = float(depth)
-        self._first_point = np.array(first_point, float) if first_point is not None else None
         self._follow_last = bool(follow_last)
 
         if points is not None:
@@ -580,11 +647,10 @@ class MOPSPathline:
         dir_flag = pyMOPS.CalcDirection.kForward if self.direction == "forward" else pyMOPS.CalcDirection.kBackward
 
         lines_acc = None
-        first = True
 
         for start, end in self.pairs:
             # loading attributes
-            if first:
+            if self._first_round:
                 self._solA.init_from_reader(pyMOPS.MPASOReader.readSolData(self.yaml_path, start, 0))
                 self._solB.init_from_reader(pyMOPS.MPASOReader.readSolData(self.yaml_path, end,   0))
             else:
@@ -609,17 +675,22 @@ class MOPSPathline:
             gap_sec = abs(self._time_gap_seconds(self._solB.getTimeStamp(), self._solA.getTimeStamp()))
 
             # Prepare seeds
-            if self._seed_points is not None:
-                seeds = self._seed_points.copy()
+            if self._first_round:
+                if self._seed_points is not None:
+                    seeds = self._seed_points.copy()
+                else:
+                    seeds = pyMOPS.MOPS_GenerateSeedsPoints(self._seed_conf)
             else:
-                seeds = pyMOPS.MOPS_GenerateSeedsPoints(self._seed_conf)
-
-            # Override first point if needed
-            if first and self._first_point is not None:
-                seeds[0] = self._first_point
-            elif (not first) and self._follow_last and (self._last_pt is not None):
-                seeds[0] = self._last_pt
-
+                if self._follow_last:
+                    if self._last_pt is None:
+                        raise RuntimeError("follow_last=True but last_pts is None")
+                    seeds = self._last_pt.copy()
+                else:
+                    if self._seed_points is not None:
+                        seeds = self._seed_points.copy()
+                    else:
+                        seeds = pyMOPS.MOPS_GenerateSeedsPoints(self._seed_conf)
+                        
             # trajectory config
             cfg = pyMOPS.TrajectorySettings()
             cfg.depth        = self._depth
@@ -633,26 +704,41 @@ class MOPSPathline:
             seg = pyMOPS.MOPS_RunPathLine(cfg, seeds)
 
             # Update last_pt
-            self._last_pt = np.asarray(seg[0]["lastPoint"], float)
+            self._last_pt = np.stack([seg[i]["lastPoint"] for i in range(len(seg))]).astype(float, copy=False)
 
             if lines_acc is None:
                 lines_acc = seg
+                n = len(lines_acc)
+                P_lists = [[np.asarray(lines_acc[i]["points"])] for i in range(n)]
+                V_lists = [[np.asarray(lines_acc[i]["velocity"])] for i in range(n)]
+                T_lists = [[np.asarray(lines_acc[i]["temperature"])] for i in range(n)]
+                S_lists = [[np.asarray(lines_acc[i]["salinity"])] for i in range(n)]
             else:
+                # Append new segment data into lists (skip first sample to avoid duplicates)
                 for i in range(len(lines_acc)):
-                    P_acc, V_acc = lines_acc[i]["points"],      lines_acc[i]["velocity"]
-                    T_acc, S_acc = lines_acc[i]["temperature"], lines_acc[i]["salinity"]
-                    P_seg, V_seg = seg[i]["points"],            seg[i]["velocity"]
-                    T_seg, S_seg = seg[i]["temperature"],       seg[i]["salinity"]
+                    P_seg = np.asarray(seg[i]["points"])
+                    V_seg = np.asarray(seg[i]["velocity"])
+                    T_seg = np.asarray(seg[i]["temperature"])
+                    S_seg = np.asarray(seg[i]["salinity"])
 
-                    if len(P_seg) > 1:
-                        lines_acc[i]["points"]      = np.vstack([P_acc, P_seg[1:]])
-                        lines_acc[i]["velocity"]    = np.vstack([V_acc, V_seg[1:]])
-                        lines_acc[i]["temperature"] = np.concatenate([T_acc, T_seg[1:]])
-                        lines_acc[i]["salinity"]    = np.concatenate([S_acc, S_seg[1:]])
+                    if P_seg.shape[0] > 1:
+                        P_lists[i].append(P_seg[1:])
+                        V_lists[i].append(V_seg[1:])
+                        T_lists[i].append(T_seg[1:])
+                        S_lists[i].append(S_seg[1:])
 
                     lines_acc[i]["lastPoint"] = seg[i]["lastPoint"]
 
-            first = False
+            self._first_round = False
+
+        # Finalize: concatenate lists into big arrays once
+        if lines_acc is not None:
+            for i in range(len(lines_acc)):
+                lines_acc[i]["points"]      = np.vstack(P_lists[i]) if len(P_lists[i]) else np.empty((0, 3), float)
+                lines_acc[i]["velocity"]    = np.vstack(V_lists[i]) if len(V_lists[i]) else np.empty((0, 3), float)
+                lines_acc[i]["temperature"] = np.concatenate(T_lists[i]) if len(T_lists[i]) else np.empty((0,), float)
+                lines_acc[i]["salinity"]    = np.concatenate(S_lists[i]) if len(S_lists[i]) else np.empty((0,), float)
+
 
         return lines_acc
 

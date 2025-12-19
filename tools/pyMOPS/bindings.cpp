@@ -397,16 +397,11 @@ PYBIND11_MODULE(pyMOPS, m) {
                     const auto& p = ln.points[i];
                     P(i,0) = p.x(); P(i,1) = p.y(); P(i,2) = p.z();
 
-                    // velocity
-                    if (i < nv) {
-                        const auto& v = ln.velocity[i];
-                        V(i,0) = v.x(); V(i,1) = v.y(); V(i,2) = v.z();
-                    } else {
-                        V(i,0) = V(i,1) = V(i,2) = double_NaN;
-                    }
+                    const auto& v = ln.velocity[i];
+                    V(i,0) = v.x(); V(i,1) = v.y(); V(i,2) = v.z();
 
-                    T(i) = (i < nt ? ln.temperature[i] : double_NaN);
-                    S(i) = (i < ns ? ln.salinity[i]    : double_NaN);
+                    T(i) = ln.temperature[i];
+                    S(i) = ln.salinity[i];
                 }
 
                 py::array_t<double> last_pt({(py::ssize_t)3});
