@@ -12,7 +12,6 @@
 ## 📦 Installation
 ### **1️⃣ Use CMake**
 ```bash
-# zsh
 cd $PSCRATCH
 git clone https://github.com/YosefQiu/MOPS.git
 cd MOPS

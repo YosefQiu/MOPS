@@ -48,6 +48,50 @@ local project_root = get_pwd()
 local third_lib_dir = project_root .. "/third_lib"
 run("mkdir -p " .. third_lib_dir)
 
+-- ZLIB
+if not should_skip("ZLIB") and need_install("ZLIB", {
+    third_lib_dir .. "/lib/libz.a",
+    third_lib_dir .. "/lib/libz.so",
+    third_lib_dir .. "/lib/libz.dylib",
+    third_lib_dir .. "/lib64/libz.a",
+    third_lib_dir .. "/lib64/libz.so",
+    third_lib_dir .. "/lib64/libz.dylib"
+}) then
+    run("rm -rf zlib")
+    run("git clone https://github.com/madler/zlib.git")
+    run("mkdir -p zlib/build")
+    run(string.format([[
+    cd zlib/build && cmake .. \
+        -DCMAKE_INSTALL_PREFIX=%s
+    ]], third_lib_dir))
+    run("cd zlib/build && make -j8 && make install")
+    print("[ZLIB] Installed to: " .. third_lib_dir)
+end
+
+-- HDF5
+if not should_skip("HDF5") and need_install("HDF5", {
+    third_lib_dir .. "/lib/libhdf5.a",
+    third_lib_dir .. "/lib/libhdf5.dylib",
+    third_lib_dir .. "/lib64/libhdf5.a",
+    third_lib_dir .. "/lib64/libhdf5.dylib"
+}) then
+    run("rm -rf hdf5")
+    run("git clone https://github.com/HDFGroup/hdf5.git")
+    run("cd hdf5 && git checkout hdf5_2.0.0")
+    run("mkdir -p hdf5/build")
+    run(string.format([[
+    cd hdf5/build && cmake .. \
+        -DCMAKE_INSTALL_PREFIX=%s \
+        -DZLIB_ROOT=%s \
+        -DHDF5_ENABLE_ZLIB_SUPPORT=ON \
+        -DHDF5_ENABLE_THREADSAFE=OFF \
+        -DHDF5_BUILD_TOOLS=OFF \
+        -DHDF5_BUILD_EXAMPLES=OFF \
+        -DBUILD_SHARED_LIBS=ON
+    ]], third_lib_dir, third_lib_dir))
+    run("cd hdf5/build && make -j8 && make install")
+    print("[HDF5] Installed to: " .. third_lib_dir)
+end
 
 -- NetCDF
 if not should_skip("NetCDF") and need_install("NetCDF", {
@@ -68,8 +112,9 @@ if not should_skip("NetCDF") and need_install("NetCDF", {
         -DBUILD_SHARED_LIBS=ON \
         -DENABLE_NETCDF_4=ON \
         -DENABLE_DAP=OFF \
-        -DENABLE_TESTS=OFF
-    ]], third_lib_dir, third_lib_dir))
+        -DENABLE_TESTS=OFF \
+        -DHDF5_ROOT=%s
+    ]], third_lib_dir, third_lib_dir, third_lib_dir))
     run("cd netcdf-c/build && make -j8 && make install")
     print("[NetCDF] Installed to: " .. third_lib_dir)
 end
@@ -118,8 +163,10 @@ if not should_skip("ndarray") and need_install("ndarray", {
       -DCMAKE_INSTALL_PREFIX=%s \
       -DCMAKE_PREFIX_PATH="%s" \
       -DNDARRAY_USE_NETCDF=ON \
+      -DNDARRAY_USE_HDF5=ON \
+      -DHDF5_ROOT=%s \
       -DBUILD_TESTING=OFF
-    ]], third_lib_dir, third_lib_dir))
+    ]], third_lib_dir, third_lib_dir, third_lib_dir))
 
     run("cd ndarray/build && make -j8 && make install")
     print("[ndarray] Installed to: " .. third_lib_dir)
