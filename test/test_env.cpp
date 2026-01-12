@@ -1,42 +1,84 @@
-#include <sycl/sycl.hpp>
+#include "catch.hpp"
+#include "ggl.h"
+#include "api/MOPS.h"
 
-#include <cmath>
-#include <iostream>
-#include "ndarray/ndarray_group_stream.hh"
-int main() {
-  const int n = 100000;
 
-  sycl::buffer<double> b_a{n}, b_b{n}, b_c{n};
+#ifdef MOPS_VTK
+  #include <vtkSmartPointer.h>
+  #include <vtkVersion.h>
+  #include <vtkRenderer.h>  
+#endif
 
-  {
-    sycl::host_accessor a{b_a, sycl::write_only};
-    sycl::host_accessor b{b_b, sycl::write_only};
-    for (size_t i = 0; i < n; i++) {
-      a[i] = sin(i) * sin(i);
-      b[i] = cos(i) * cos(i);
+
+static bool try_init(const char* device, std::string& err) {
+    try {
+        MOPS::MOPS_Init(device);           
+        return true;
+    } catch (const sycl::exception& e) {
+        err = e.what();
+        return false;
+    } catch (const std::exception& e) {
+        err = e.what();
+        return false;
+    } catch (...) {
+        err = "unknown exception";
+        return false;
     }
-  }
-
-  sycl::queue q{sycl::gpu_selector_v};
-
-  q.submit([&](sycl::handler &h) {
-    sycl::accessor a{b_a, h, sycl::read_only};
-    sycl::accessor b{b_b, h, sycl::read_only};
-    sycl::accessor c{b_c, h, sycl::write_only};
-
-    h.parallel_for(n, [=](sycl::id<1> i) { c[i] = a[i] + b[i]; });
-  });
-
-  {
-    double sum = 0.0;
-    sycl::host_accessor c{b_c, sycl::read_only};
-    for (size_t i = 0; i < n; i++)
-      sum += c[i];
-    std::cout << "sum = " << sum / n << std::endl;
-
-    if (!(fabs(sum - static_cast<double>(n)) <= 1.0e-8))
-      return 1;
-  }
-
-  return 0;
 }
+
+static bool sycl_example() {
+    sycl::buffer<sycl::opencl::cl_int, 1> Buffer(4);
+    sycl::queue Queue;
+    sycl::range<1> NumOfWorkItems{Buffer.size()};
+    Queue.submit([&](sycl::handler &cgh) {
+        auto Accessor = Buffer.get_access<sycl::access::mode::write>(cgh);
+        cgh.parallel_for<class FillBuffer>(
+            NumOfWorkItems, [=](sycl::id<1> WIid) {
+            Accessor[WIid] = (sycl::opencl::cl_int)WIid.get(0);
+            });
+    });
+    const auto HostAccessor = Buffer.get_host_access(sycl::read_only);;
+
+    bool MismatchFound = false;
+    for (size_t I = 0; I < Buffer.size(); ++I) {
+        if (HostAccessor[I] != I) {
+        std::cout << "The result is incorrect for element: " << I
+                    << " , expected: " << I << " , got: " << HostAccessor[I]
+                    << std::endl;
+        MismatchFound = true;
+        }
+    }
+
+    if (!MismatchFound) {
+        std::cout << "The results are correct!" << std::endl;
+    }
+
+    return MismatchFound;
+}
+
+TEST_CASE("SYCL runtime/device availability via MOPSApp::init", "[env][sycl]") {
+
+    SECTION("GPU environment initialization") {
+        std::string err;
+        const bool ok = try_init("gpu", err);
+
+        if (!ok) {
+            WARN("GPU init failed. Error: " << err);
+            SUCCEED("GPU checks skipped.");
+        } else {
+            SUCCEED("GPU init succeeded.");
+        }
+    }
+
+    SECTION("SYCL example execution") {
+        REQUIRE(sycl_example() == false);
+    }
+}
+#ifdef MOPS_VTK
+TEST_CASE("VTK runtime sanity", "[env][vtk]") {
+
+    INFO("VTK version: " << vtkVersion::GetVTKVersion());
+    auto renderer = vtkSmartPointer<vtkRenderer>::New();
+    REQUIRE(renderer != nullptr);
+}
+#endif

@@ -507,26 +507,60 @@ class MOPSPathline:
       3) set_seed(depth, lat_range=(lat_min,lat_max), lon_range=(lon_min,lon_max),
                   grid=(nx,ny), points=None, follow_last=True)
       4) run(method="rk4", delta_minutes=1, record_every_minutes=6) -> list[dict]
+    
+    Important stateful behavior:
+      - This class is STATEFUL across consecutive run() calls and across month-pairs.
+      - `_first_round` indicates whether we are at the very first month-pair segment.
+      - `_last_pt` stores the last position of each particle from the previous segment.
+      - If follow_last=True, subsequent segments will start from `_last_pt` (continuation).
+      - When you change "depth groups", you usually want to reset `_first_round/_last_pt`
+        so that each depth group starts from its own initial seeds (not from previous depth).
     """
     def __init__(self, yaml_path: str):
+        # Path to the dataset yaml (grid + solution time series)
         self.yaml_path = yaml_path
+        # Grid data (static mesh)
         self.grid = pyMOPS.MPASOGrid()
+        # List of (start_month, end_month) time pairs to trace through
         self.pairs = None
+        # "forward" or "backward"
         self.direction = "forward"
         self._seed_conf = None
         self._seed_points = None
+        # If True, use last points of previous segment as the seeds for the next segment.
+        # This is intended for continuing the SAME set of particles over multiple month pairs.
         self._follow_last = True
         self._first_round = True
+        # The (scalar) depth used for trajectory configuration (meters, positive downward)
         self._depth = None
         self._last_pt = None  # (N,3) np.ndarray, last point of each particle
         self._one_min = 60
-
+        # Two solution buffers for time interpolation (A: current, B: next)
         self._solA = pyMOPS.MPASOSolution()
         self._solB = pyMOPS.MPASOSolution()
 
+    def reset_segments(self):
+        """
+        Reset "segment continuation" state.
+
+        Call this when you want a new independent run sequence,
+        e.g., when you switch to a different depth group.
+
+        After calling this:
+          - The next run() will treat the next month-pair as the first segment.
+          - Seeds will come from the user-provided points / generated seeds again.
+          - `_last_pt` will be cleared, so follow_last continuation will not happen
+            across different depth groups.
+        """
+        self._first_round = True
+        self._last_pt = None
+        
     @staticmethod
     def _month_pairs_forward(sy, sm, ey, em):
         """
+        Generate monthly pairs for forward tracing:
+        [('YYYY-MM-01', 'YYYY-(MM+1)-01'), ...] until end month.
+        
         [('00sy-0sm-01','00sy-0sm+1-01'), ... , ('00ey-em-01','00ey-em+1-01')]
         example: month_pairs_forward(18,1,20,12)
         [('0018-01-01', '0018-02-01'), ..., ('0020-11-01', '0020-12-01')]
@@ -572,6 +606,10 @@ class MOPSPathline:
         return int(y)*10000 + int(mo)*100 + int(d)
     @staticmethod
     def _time_gap_seconds(t1: str, t2: str, fmt: str = "%Y-%m-%d_%H:%M:%S") -> int:
+        """
+        Compute |t1 - t2| in seconds, where t1/t2 are timestamps embedded in solution objects.
+        Some strings may contain trailing '\x00', so we strip them.
+        """
         t1 = t1.split("\x00", 1)[0].strip()
         t2 = t2.split("\x00", 1)[0].strip()
 
@@ -579,15 +617,27 @@ class MOPSPathline:
         dt2 = datetime.strptime(t2, fmt)
         return int((dt1 - dt2).total_seconds())
 
-    # ① init
+    # -------------------------------------------------------------------------
+    # (1) Initialize MOPS runtime and load grid
+    # -------------------------------------------------------------------------
     def init(self, device: str = "gpu"):
+        """Initialize MOPS and load the static grid mesh."""
         pyMOPS.MOPS_Init(device)
         # loading grid
         self.grid.init_from_reader(pyMOPS.MPASOReader.readGridData(self.yaml_path))
         return self
 
-    # ② set time range
+    # -------------------------------------------------------------------------
+    # (2) Configure time range for pathline tracing
+    # -------------------------------------------------------------------------
     def set_time(self, sy: int, sm: int, ey: int, em: int, direction: str = "forward"):
+        """
+        Set the tracing time range (month-based) and direction.
+
+        direction:
+          - "forward": month_pairs_forward
+          - "backward": month_pairs_backward
+        """
         self.direction = direction.lower()
         if self.direction == "forward":
             self.pairs = self._month_pairs_forward(sy, sm, ey, em)
@@ -599,7 +649,9 @@ class MOPSPathline:
             raise ValueError("no month pairs produced; check input range")
         return self
 
-    # ③ set seeds
+    # -------------------------------------------------------------------------
+    # (3) Configure seeds: either explicit points or lat/lon range grid
+    # -------------------------------------------------------------------------
     def set_seed(
         self,
         depth: float,
@@ -614,6 +666,10 @@ class MOPSPathline:
         A) Give lat/lon + grid (internally use MOPS to generate sampling)
         B) Directly give the Cartesian coordinates of points (N,3)
         follow_last: If True, the first seed will be replaced by the last point of the previous segment (default True)
+        IMPORTANT:
+          If you change depth group and want an independent run, call reset_segments(),
+          otherwise `_first_round` may remain False and cause
+          the next run() to continue from previous depth's `_last_pt`.
         """
         self._depth = float(depth)
         self._follow_last = bool(follow_last)
@@ -636,8 +692,23 @@ class MOPSPathline:
             self._seed_points = None
         return self
 
-    # ④ run
+    # -------------------------------------------------------------------------
+    # (4) Run pathline tracing through all month pairs and concatenate results
+    # -------------------------------------------------------------------------
     def run(self, method: str = "rk4", delta_minutes: int = 1, record_every_minutes: int = 6):
+        """
+        Execute pathline integration across all configured month pairs, and concatenate
+        per-segment results into a single long trajectory per particle.
+
+        Returns:
+          lines_acc: list[dict], where each dict corresponds to one particle line and contains:
+            - "lineID" (int)
+            - "points" (M,3)
+            - "velocity" (M,3)
+            - "temperature" (M,)
+            - "salinity" (M,)
+            - "lastPoint" (3,)
+        """
         if self.pairs is None:
             raise RuntimeError("call set_time(...) before run()")
         if self._depth is None:

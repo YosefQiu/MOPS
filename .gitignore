@@ -24,3 +24,5 @@ netcdf-c
 build*
 .cache
 .cache/*
+hdf5
+zlib
