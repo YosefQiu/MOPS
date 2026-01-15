@@ -922,28 +922,70 @@ bool compareTrajectoryLines(const std::vector<TrajectoryLine>& a, const std::vec
 
 std::vector<TrajectoryLine> MPASOVisualizer::removeNaNTrajectoriesAndReindex(std::vector<TrajectoryLine>& trajectory_lines)
 {
-    std::vector<int> hasNan(trajectory_lines.size(), 0);
-    tbb::parallel_for(size_t(0), trajectory_lines.size(), [&](size_t i) {
-        auto& line = trajectory_lines[i];
-        for (const auto& point : line.points) {
-            if (sycl::isnan(point.x()) || sycl::isnan(point.y()) || sycl::isnan(point.z())) {
-                hasNan[i] = 1;
-                break;
-            }
+    const size_t n = trajectory_lines.size();
+    // cut[i] = Index of the first invalid point; if all are valid, returns length of the trajectory
+    std::vector<size_t> cut(n, 0);
+
+    auto is_valid = [](const CartesianCoord& p) -> bool {
+        return sycl::isfinite(p.x()) && sycl::isfinite(p.y()) && sycl::isfinite(p.z());
+    };
+
+    // 1) Parallel: Find the position of the first invalid point on each trajectory.
+    tbb::parallel_for(size_t(0), n, [&](size_t i) {
+        const auto& line = trajectory_lines[i];
+
+        // Avoid empty points
+        const size_t len = line.points.size();
+        size_t k = 0;
+        for (; k < len; ++k) {
+            if (!is_valid(line.points[k])) break;
         }
+        cut[i] = k; // k==0 means the first point is invalid
     });
 
-    std::vector<TrajectoryLine> cleaned_trajectories;
-    cleaned_trajectories.reserve(trajectory_lines.size());
-    int new_index = 0;
-    for (size_t i = 0; i < trajectory_lines.size(); ++i) {
-        if (hasNan[i] == 0) {
-            auto& line = trajectory_lines[i];
-            line.lineID = new_index++;
-            cleaned_trajectories.push_back(line);
+    // 2) Serial: Truncate/delete according to cut + reindex
+    std::vector<TrajectoryLine> cleaned;
+    cleaned.reserve(n);
+
+    int new_id = 0;
+    for (size_t i = 0; i < n; ++i) {
+        auto& line = trajectory_lines[i];
+
+        // Align lengths (ensure four arrays are synchronized)
+        const size_t min_len = std::min({ line.points.size(),
+                                          line.velocity.size(),
+                                          line.temperature.size(),
+                                          line.salinity.size() });
+
+        if (min_len == 0) {
+            // No points: delete directly
+            continue;
         }
+
+        // Note: cut is calculated based on points, so clamp to min_len as well
+        size_t k = std::min(cut[i], min_len);
+
+        if (k == 0) {
+            // Case 3: The first point is NaN/Inf -> delete the entire trajectory
+            continue;
+        }
+
+        // Case 1/2: Truncate to k (if k==min_len, it's effectively unchanged)
+        line.points.resize(k);
+        line.velocity.resize(k);
+        line.temperature.resize(k);
+        line.salinity.resize(k);
+
+        // Update lastPoint
+        line.lastPoint = line.points.back();
+
+        // Reindex ID
+        line.lineID = new_id++;
+
+        cleaned.push_back(line); // Copy/move a clean trajectory
     }
-    return cleaned_trajectories;
+
+    return cleaned;
 }
 
 std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std::vector<CartesianCoord>& points, TrajectorySettings* config, std::vector<int>& default_cell_id, sycl::queue& sycl_Q)
@@ -1330,6 +1372,14 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                 if (bEulerMethod)
                 {
                     current_velocity = CalcVelocityAt(current_position, cell_id);
+                    // debug
+                    if (bFirstVel)
+                    {
+                        out << "[First Vel] gid="<<global_id
+                            <<" cell_id="<<cell_id
+                            <<" vel=("<<current_velocity.x()<<","<<current_velocity.y()<<","<<current_velocity.z()<<")"
+                            << sycl::endl;
+                    }
                 }
                 else
                 {
@@ -1413,11 +1463,11 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
         }
     });
     std::cout << "traj size " << trajectory_lines.size() << std::endl; 
-    // auto clean_traj = removeNaNTrajectoriesAndReindex(trajectory_lines);
+    auto clean_traj = removeNaNTrajectoriesAndReindex(trajectory_lines);
     // std::cout << "clean traj size " << clean_traj.size() << std::endl;
-    // trajectory_lines.clear();
-    // return clean_traj;
-    return trajectory_lines;
+    trajectory_lines.clear();
+    return clean_traj;
+    // return trajectory_lines;
 }
 
 std::vector<TrajectoryLine> MPASOVisualizer::PathLine(MPASOField* mpasoF, std::vector<CartesianCoord>& points, TrajectorySettings* config, std::vector<int>& default_cell_id, sycl::queue& sycl_Q)
@@ -2063,12 +2113,12 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(MPASOField* mpasoF, std::v
         }
     });
 
-    return trajectory_lines;
-    // std::cout << "traj size " << trajectory_lines.size() << std::endl; 
-    // auto clean_traj = removeNaNTrajectoriesAndReindex(trajectory_lines);
+    // return trajectory_lines;
+    std::cout << "traj size " << trajectory_lines.size() << std::endl; 
+    auto clean_traj = removeNaNTrajectoriesAndReindex(trajectory_lines);
     // std::cout << "clean traj size " << clean_traj.size() << std::endl;
-    // trajectory_lines.clear();
-    // return clean_traj;
+    trajectory_lines.clear();
+    return clean_traj;
 }
 
 

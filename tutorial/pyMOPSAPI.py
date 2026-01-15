@@ -126,6 +126,7 @@ def generate_points_from_anchor(anchor_xyz, n=15, lon_step_deg=2.0):
         pts[i] = make_same_lat_depth_diff_lon(pts[0], lon_step_deg * i)
     return pts
 
+@deprecated("You should implement your own visualization function. pyMOPS does not include any visualization code.")
 def Vis_PathLines(
     trajectory_lines,
     save_path="pathlines.png",
