@@ -97,6 +97,18 @@ target_include_directories(${PROJECT_NAME}
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/src>
 )
 
+# Ensure SYCL offloading flags are applied to the core library as well
+target_compile_options(${PROJECT_NAME} PRIVATE
+  -fsycl
+  -fsycl-targets=nvptx64-nvidia-cuda
+  -Wdeprecated-declarations
+)
+target_link_options(${PROJECT_NAME} PRIVATE
+  -fsycl
+  -fsycl-targets=nvptx64-nvidia-cuda
+  -Wdeprecated-declarations
+)
+
 target_link_libraries(${PROJECT_NAME} PUBLIC
   ${VTK_LIBRARIES}
   yaml-cpp::yaml-cpp
