@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: self-hosted
+    env:
+      CI: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show tool versions
+        shell: bash -l {0}
+        run: |
+          which icx || true
+          which icpx || true
+          icx --version || true
+          icpx --version || true
+          nvcc --version || true
+          cmake --version
+
+      - name: Configure (CMake)
+        shell: bash -l {0}
+        env:
+          CC: icx
+          CXX: icpx
+        run: |
+          rm -rf build && mkdir -p build
+          cd build
+          cmake .. \
+            -G "Unix Makefiles" \
+            -DCMAKE_C_COMPILER=icx \
+            -DCMAKE_CXX_COMPILER=icpx \
+            -DMOPS_VTK=ON \
+            -DMOPS_PYTHON=ON \
+            -DMOPS_TUTORIAL=OFF \
+            -DMOPS_TESTING=ON
+
+      - name: Build
+        shell: bash -l {0}
+        run: |
+          cmake --build build -- -j6
+
+      - name: Run tests
+        shell: bash -l {0}
+        run: |
+          cd build
+          ./test/all_tests

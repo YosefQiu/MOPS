@@ -3,6 +3,13 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/test)
 add_library(catch_main OBJECT impl.cpp)
 target_include_directories(catch_main PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
+# Ensure SYCL flags are present for the Catch2 object library,
+target_compile_options(catch_main PRIVATE
+  -fsycl
+  -fsycl-targets=nvptx64-nvidia-cuda
+  -Wdeprecated-declarations
+)
+
 file(GLOB TEST_SOURCES CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/test_*.cpp"
 )
