@@ -1,6 +1,6 @@
 #include "Core/MOPSApp.h"
 #include <vector>
-
+#include "version.h"
 
 
 namespace MOPS
@@ -16,7 +16,7 @@ namespace MOPS
         std::cout << "Device vendor   : " << mSYCLQueue.get_device().get_info<sycl::info::device::vendor>() << "\n";
         std::cout << "Device version  : " << mSYCLQueue.get_device().get_info<sycl::info::device::version>() << "\n";
 
-		
+		std::cout << "MOPS Version    : " << MOPS_VERSION << "\n";
 
 		mpasoGrid = std::make_shared<MPASOGrid>();
 		
@@ -27,7 +27,7 @@ namespace MOPS
 		mpasoGrid = std::move(grid);
 		mpasoGrid->createKDTree((mpasoGrid->mCachedDataDir + "/" + "KDTree.bin").c_str(), mSYCLQueue);
 		mDataDir = mpasoGrid->mCachedDataDir;
-		std::cout << " [\u2713]finished loading grid information" << std::endl;
+		Debug("[MOPSApp]::Finished loading grid information");
     }
 
     void MOPSApp::addSol(int solID, std::shared_ptr<MPASOSolution> sol)
@@ -52,31 +52,31 @@ namespace MOPS
 
 		if (mpasoSol->cellVertexZTop_vec.size() == 0)
 		{
-			std::cout << " [ Run calcCellCenterZtop" << " ]\n";
+			Debug("[MOPSApp]::Run calcCellCenterZtop");
 			mpasoSol->calcCellCenterZtop();
-			std::cout << " [ Run calcCellVertexZtop" << " ]\n";
+			Debug("[MOPSApp]::Run calcCellVertexZtop");
 			mpasoSol->calcCellVertexZtop(mpasoGrid.get(), mDataDir, mSYCLQueue);
 		}
 		if (mpasoSol->cellVertexZonalVelocity_vec.size() == 0 && mpasoSol->cellVertexMeridionalVelocity_vec.size() == 0
 			&& mpasoSol->cellVertexVelocity_vec.size() == 0)
 		{
-			std::cout << " [ Run calcCellCenterVelocity" << " ]\n";
+			Debug("[MOPSApp]::Run calcCellCenterVelocity");
 			mpasoSol->calcCellCenterVelocityByZM(mpasoGrid.get(), mDataDir, mSYCLQueue);
-			std::cout << " [ Run calcCellVertexVelocity" << " ]\n";
+			Debug("[MOPSApp]::Run calcCellVertexVelocity");
 			mpasoSol->calcCellVertexVelocity(mpasoGrid.get(), mDataDir, mSYCLQueue);
 		}
 		
 
 		for (const auto& [name, vec] : mpasoSol->mDoubleAttributes)
 		{
-			std::cout << " [ Run calcCellCenterToVertex for " << name << " ]\n";
+			Debug("[MOPSApp]::Run calcCellCenterToVertex for %s", name.c_str());
 			mpasoSol->calcCellCenterToVertex(name, vec, mpasoGrid.get(), mDataDir, mSYCLQueue);
-			std::cout << " [\u2713]finished loading sol information at timestep [ " << mpasoSol->mTimesteps << " ]" << std::endl;
+			Debug("[MOPSApp]::Finished loading sol information at timestep %d", mpasoSol->mTimesteps);
 		}
 
 		mpasoAttributeMap[solID] = mpasoSol;
 
-		std::cout << "Total number of attributes: " << mpasoAttributeMap.size() << std::endl;		
+		Debug("[MOPSApp]::Total number of attributes: %zu", mpasoAttributeMap.size());
     }
 
     void MOPSApp::addField()
@@ -92,7 +92,7 @@ namespace MOPS
 		auto iter = mpasoAttributeMap.find(ID1);
 		if (iter == mpasoAttributeMap.end())
 		{
-			std::cout << " [activeAttribute]::Error: solID [ " << ID1 << " ] not found" << std::endl;
+			Error("[MOPSApp]::activeAttribute: solID %d not found", ID1);
 			return;
 		}
         if (ID2.has_value())
@@ -100,7 +100,7 @@ namespace MOPS
             auto iter2 = mpasoAttributeMap.find(ID2.value());
             if (iter2 == mpasoAttributeMap.end())
             {
-                std::cout << " [activeAttribute]::Error: solID [ " << ID2.value() << " ] not found" << std::endl;
+                Error("[MOPSApp]::activeAttribute: solID %d not found", ID2.value());
                 return;
             }
             mpasoField->initField(mpasoGrid, iter->second, iter2->second);
@@ -130,9 +130,9 @@ namespace MOPS
 		
 		
 		// remapping
-		std::cout << " [ Run remapping " << " ]\n";
+		Debug("[MOPSApp]::Run remapping");
 		MPASOVisualizer::VisualizeFixedDepth(mpasoField.get(), config, img_vec, mSYCLQueue);
-		std:: cout << " ==== [\u2713] done..." << std::endl;
+		Debug("[MOPSApp]::Remapping done");
 
 		return img_vec;
     }
@@ -166,11 +166,11 @@ namespace MOPS
 		auto test_cell_id = cell_id_vec[0];
 		auto test_cell_surface_vel = mpasoField->mSol_Front->cellCenterVelocity_vec[mpasoField->mSol_Front->mVertLevels * test_cell_id + 0];
 		auto vel_length = YOSEF_LENGTH(test_cell_surface_vel);
-		std::cout << " test_cell_id = " << test_cell_id << " test_cell_surface_vel = " << test_cell_surface_vel.x() 
-			<< " " << test_cell_surface_vel.y() << " " << test_cell_surface_vel.z() << " length = " << vel_length << std::endl;
+		Debug("[MOPSApp]::test_cell_id = %d, test_cell_surface_vel = (%.6f, %.6f, %.6f), length = %.6f", 
+			test_cell_id, test_cell_surface_vel.x(), test_cell_surface_vel.y(), test_cell_surface_vel.z(), vel_length);
 		
 		auto lines = MPASOVisualizer::StreamLine(mpasoField.get(), sample_points, config, cell_id_vec, mSYCLQueue);
-		std:: cout << " ==== [\u2713] done..." << std::endl;
+		Debug("[MOPSApp]::StreamLine done");
 		return lines;
 	}
 
@@ -179,13 +179,13 @@ namespace MOPS
 		// check if the SolFront and SolBack are set
 		if (mpasoField == nullptr)
 		{
-			std::cerr << "[Error]: mpasoField is nullptr, please activeAttribute first." << std::endl;
+			Error("[MOPSApp]::mpasoField is nullptr, please activeAttribute first");
 			exit(-1);
 		}
 
 		if (mpasoField->mSol_Front == nullptr || mpasoField->mSol_Back == nullptr)
 		{
-			std::cerr << "[Error]: Sol_Front or Sol_Back is nullptr, please activeAttribute first." << std::endl;
+			Error("[MOPSApp]::Sol_Front or Sol_Back is nullptr, please activeAttribute first");
 			exit(-1);
 		}
 
@@ -199,8 +199,7 @@ namespace MOPS
 		mpasoField->calcInWhichCells(sample_points, cell_id_vec);
 		
 		auto lines_i = MPASOVisualizer::PathLine(mpasoField.get(), sample_points, config, cell_id_vec, mSYCLQueue);
-		std:: cout << " ==== [\u2713] done... [ " 
-			<< solFront->getTimeStamp() << " to " << solBack->getTimeStamp() << " ]" << std::endl;
+		Debug("[MOPSApp]::PathLine done [%s to %s]", solFront->getTimeStamp().c_str(), solBack->getTimeStamp().c_str());
 
 		// update sample_points
 		for (auto sample_idx = 0; sample_idx < sample_points.size(); sample_idx++)
@@ -256,14 +255,14 @@ namespace MOPS
 	{
 		if (!mpasoGrid)
 		{
-			std::cerr << "[Error]: Grid is nullptr" << std::endl;
+			Error("[MOPSApp]::Grid is nullptr");
 			return false;
 		}
 
 		bool grid_valid = mpasoGrid->checkAttribute();
 		if (!grid_valid)
 		{
-			std::cerr << "[Error]: Grid attribute check failed" << std::endl;
+			Error("[MOPSApp]::Grid attribute check failed");
 			return false;
 		}
 
@@ -271,12 +270,12 @@ namespace MOPS
 		{
 			if (!sol)
 			{
-				std::cerr << "[Error]: Solution at solID " << id << " is nullptr" << std::endl;
+				Error("[MOPSApp]::Solution at solID %d is nullptr", id);
 				return false;
 			}
 			if (!sol->checkAttribute())
 			{
-				std::cerr << "[Error]: Attribute check failed at solID " << id << std::endl;
+				Error("[MOPSApp]::Attribute check failed at solID %d", id);
 				return false;
 			}
 		}

@@ -3,7 +3,6 @@
 #include "api/MOPS.h"
 #include "Utils/cxxopts.hpp"
 #include "Utils/Utils.hpp"
-#include <string>
 #if MOPS_VTK
 #include "IO/VTKFileManager.hpp"
 #endif
@@ -48,7 +47,7 @@ bool parseCommandLine(int argc, char* argv[],
     }
 	if (!results.count("input")) 
 	{
-        MOPS::Debug("[ERROR]::No input file detected");
+		std::cout << "[ERROR]::Input yaml file is required." << std::endl;
         return false;
 	}
 	return true;

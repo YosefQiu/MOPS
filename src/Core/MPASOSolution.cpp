@@ -27,9 +27,9 @@ void MPASOSolution::initSolution_FromBin(const char* prefix)
     readFromBlock_DoubleBasedK(std::string(prefix) + "LayerThickness.bin", cellLayerThickness_vec);
     
 
-    std::cout << "cellVertexZTop_vec size " << cellVertexZTop_vec.size() << std::endl;
-    std::cout << "cellVertexVelocity_vec size " << cellVertexVelocity_vec.size() << std::endl;
-    std::cout << "cellVertexMeridionalVelocity_vec size " << cellVertexMeridionalVelocity_vec.size() << std::endl;
+    Debug("[MPASOSolution]::cellVertexZTop_vec size = %zu", cellVertexZTop_vec.size());
+    Debug("[MPASOSolution]::cellVertexVelocity_vec size = %zu", cellVertexVelocity_vec.size());
+    Debug("[MPASOSolution]::cellVertexMeridionalVelocity_vec size = %zu", cellVertexMeridionalVelocity_vec.size());
 
 }
 
@@ -72,7 +72,7 @@ void MPASOSolution::initSolution(MPASOReader* reader)
 
 void MPASOSolution::initSolution(ftk::ndarray_group* g, MPASOReader* reader)
 {
-    std::cout << "==========================================\n";
+    Debug("[MPASOSolution]::===========================================");
     
     // this->mTimeStamp = std::move(reader->currentTimestep);
     this->mCellsSize = reader->mCellsSize;
@@ -88,7 +88,7 @@ void MPASOSolution::initSolution(ftk::ndarray_group* g, MPASOReader* reader)
     std::vector<char> time_vec_s;
     std::vector<char> time_vec_e;
    
-    std::cout << "          [ MPASOSolution::initSolution::timestep = " << this->mTimesteps << " ]\n";
+    Debug("[MPASOSolution]::initSolution::timestep = %d", this->mTimesteps);
     copyFromNdarray_Double(g, "bottomDepth", this->cellBottomDepth_vec);
     copyFromNdarray_Double(g, "velocityZonal", this->cellZonalVelocity_vec);
     copyFromNdarray_Double(g, "velocityMeridional", this->cellMeridionalVelocity_vec);
@@ -133,7 +133,7 @@ void MPASOSolution::addAttribute(std::string name, AttributeFormat type)
 {
     if (this->gt == nullptr)
     {
-        std::cerr << "[MPASOSolution]]::Error: gt is not initialized" << std::endl;
+        Error("[MPASOSolution]::gt is not initialized");
         return;
     }
 
@@ -157,7 +157,7 @@ void MPASOSolution::addAttribute(std::string name, AttributeFormat type)
     }
     else if (type == AttributeFormat::kVec3)
     {
-        std::cout << "kVec3 is not supported temporarily" << std::endl;
+        Debug("[MPASOSolution]::kVec3 is not supported temporarily");
     }
 
    
@@ -376,11 +376,11 @@ void writeVertexZTopToFile(const std::vector<T>& vertexZTop_vec, const std::stri
         size_t size = vertexZTop_vec.size();
         outFile.write(reinterpret_cast<const char*>(&size), sizeof(size)); // Write the size of the vector
         outFile.write(reinterpret_cast<const char*>(vertexZTop_vec.data()), size * sizeof(T)); // Write the data
-        std::cout << "Wrote " << size << " elements to " << filename << std::endl;
+        Debug("[MPASOSolution]::Wrote %zu elements to %s", size, filename.c_str());
         outFile.close();
     }
     else {
-        std::cerr << "Unable to open file for writing: " << filename << std::endl;
+        Error("[MPASOSolution]::Unable to open file for writing: %s", filename.c_str());
     }
 }
 
@@ -393,10 +393,10 @@ void readVertexZTopFromFile(std::vector<T>& vertexZTop_vec, const std::string& f
         vertexZTop_vec.resize(size);
         inFile.read(reinterpret_cast<char*>(vertexZTop_vec.data()), size * sizeof(T)); // Read the data
         inFile.close();
-        std::cout << "Read " << size << " elements from " << filename << std::endl;
+        Debug("[MPASOSolution]::Read %zu elements from %s", size, filename.c_str());
     }
     else {
-        std::cerr << "Unable to open file for reading: " << filename << std::endl;
+        Error("[MPASOSolution]::Unable to open file for reading: %s", filename.c_str());
     }
 }
 
@@ -404,7 +404,7 @@ void readVertexZTopFromFile(std::vector<T>& vertexZTop_vec, const std::string& f
 void saveDataToTextFile2(const std::vector<vec3>& data, const std::string& filename) {
     std::ofstream outfile(filename);
     if (!outfile.is_open()) {
-        std::cerr << "Failed to open file: " << filename << std::endl;
+        Error("[MPASOSolution]::Failed to open file: %s", filename.c_str());
         return;
     }
 
@@ -413,7 +413,7 @@ void saveDataToTextFile2(const std::vector<vec3>& data, const std::string& filen
     }
 
     outfile.close();
-    std::cout << "Data saved to " << filename << std::endl;
+    Debug("[MPASOSolution]::Data saved to %s", filename.c_str());
 }
 
 //TODO
@@ -421,7 +421,7 @@ void saveDataToTextFile(const std::vector<double>& data, const std::string& file
     int MAX_VERTEX_NUM = 7;
     std::ofstream outfile(filename);
     if (!outfile.is_open()) {
-        std::cerr << "Failed to open file: " << filename << std::endl;
+        Error("[MPASOSolution]::Failed to open file: %s", filename.c_str());
         return;
     }
 
@@ -439,14 +439,14 @@ void saveDataToTextFile(const std::vector<double>& data, const std::string& file
     }
 
     outfile.close();
-    std::cout << "Data saved to " << filename << std::endl;
+    Debug("[MPASOSolution]::Data saved to %s", filename.c_str());
 }
 
 
 void saveDataToTextFile3(const std::vector<vec3>& data, const std::string& filename) {
     std::ofstream outfile(filename);
     if (!outfile.is_open()) {
-        std::cerr << "Failed to open file: " << filename << std::endl;
+        Error("[MPASOSolution]::Failed to open file: %s", filename.c_str());
         return;
     }
     int MAX_VERTEX_NUM = 7;
@@ -464,7 +464,7 @@ void saveDataToTextFile3(const std::vector<vec3>& data, const std::string& filen
     }
 
     outfile.close();
-    std::cout << "Data saved to " << filename << std::endl;
+    Debug("[MPASOSolution]::Data saved to %s", filename.c_str());
 }
 
 
@@ -1393,7 +1393,7 @@ void MPASOSolution::copyFromNdarray_Double(ftk::ndarray_group* g, std::string va
 {
     if (g->has(value))
     {
-        std::cout << "====== " << value << " found [\u2713]" << std::endl;
+        Debug("[Ndarray]::%s found [✓]", value.c_str());
         auto tmp_get = g->get(value);
         // std::cout << "tmp_get = " << tmp_get.get() << std::endl;
         //  std::cout << "Actual type of tmp_get: " << typeid(*tmp_get).name() << std::endl;
@@ -1440,7 +1440,7 @@ void MPASOSolution::copyFromNdarray_Char(ftk::ndarray_group* g, std::string valu
 {
     if (g->has(value))
     {
-        std::cout << "====== " << value << " found [\u2713]" << std::endl;
+        Debug("[Ndarray]::%s found [✓]", value.c_str());
         auto tmp_get = g->get(value);
         auto tmp_ptr = std::dynamic_pointer_cast<ftk::ndarray<char>>(g->get(value));
         if (tmp_ptr) 
@@ -1456,7 +1456,7 @@ void MPASOSolution::copyFromNdarray_Char(ftk::ndarray_group* g, std::string valu
         }
         else
         {
-            std::cerr << "[Error]: The value found is not of type ftk::ndarray<char>" << std::endl;
+            Error("[Ndarray]::The value found is not of type ftk::ndarray<char>");
         }
     }
     else
@@ -1470,7 +1470,7 @@ void MPASOSolution::copyFromNdarray_Float(ftk::ndarray_group* g, std::string val
 {
     if (g->has(value))
     {
-        std::cout << "====== " << value << " found [\u2713]" << std::endl;
+        Debug("[Ndarray]::%s found [✓]", value.c_str());
         auto tmp_get = g->get(value);
        
         auto tmp_ptr = std::dynamic_pointer_cast<ftk::ndarray<float>>(g->get(value));

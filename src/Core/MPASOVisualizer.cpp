@@ -256,7 +256,6 @@ void MPASOVisualizer::VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSetti
     sycl::buffer<vec3, 1> cellVertexVelocity_buf(mpasoF->mSol_Front->cellVertexVelocity_vec.data(), sycl::range<1>(mpasoF->mSol_Front->cellVertexVelocity_vec.size()));
     sycl::buffer<double, 1> cellVertexZTop_buf(mpasoF->mSol_Front->cellVertexZTop_vec.data(), sycl::range<1>(mpasoF->mSol_Front->cellVertexZTop_vec.size()));
 
-    std::cout << "debug double attributes size " << mpasoF->mSol_Front->mDoubleAttributes.size() << std::endl;
     
     bool bDoubleAttributes = false;
     std::vector<std::string> attr_names;
@@ -943,7 +942,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::removeNaNTrajectoriesAndReindex(std
         cut[i] = k; // k==0 means the first point is invalid
     });
 
-    // 2) Serial: Truncate/delete according to cut + reindex
+    // 2) Serial: Fill invalid points with last valid point (velocity=0), keep all trajectories same length
     std::vector<TrajectoryLine> cleaned;
     cleaned.reserve(n);
 
@@ -951,30 +950,55 @@ std::vector<TrajectoryLine> MPASOVisualizer::removeNaNTrajectoriesAndReindex(std
     for (size_t i = 0; i < n; ++i) {
         auto& line = trajectory_lines[i];
 
-        // Align lengths (ensure four arrays are synchronized)
-        const size_t min_len = std::min({ line.points.size(),
-                                          line.velocity.size(),
-                                          line.temperature.size(),
-                                          line.salinity.size() });
+        // Get original length (use max to preserve length)
+        const size_t original_len = line.points.size();
 
-        if (min_len == 0) {
-            // No points: delete directly
+        if (original_len == 0) {
+            // No points: skip this trajectory
             continue;
         }
 
-        // Note: cut is calculated based on points, so clamp to min_len as well
-        size_t k = std::min(cut[i], min_len);
+        // Ensure all arrays have the same length
+        line.velocity.resize(original_len, CartesianCoord{0.0, 0.0, 0.0});
+        line.temperature.resize(original_len, 0.0);
+        line.salinity.resize(original_len, 0.0);
+
+        size_t k = cut[i];
 
         if (k == 0) {
-            // Case 3: The first point is NaN/Inf -> delete the entire trajectory
-            continue;
-        }
+            // Case: The first point is NaN/Inf
+            // Keep the first point position (even if NaN), set velocity to 0, and copy to all points
+            CartesianCoord first_pos = line.points[0];
+            CartesianCoord zero_vel = {0.0, 0.0, 0.0};
+            double first_temp = line.temperature[0];
+            double first_sal = line.salinity[0];
 
-        // Case 1/2: Truncate to k (if k==min_len, it's effectively unchanged)
-        line.points.resize(k);
-        line.velocity.resize(k);
-        line.temperature.resize(k);
-        line.salinity.resize(k);
+            for (size_t j = 0; j < original_len; ++j) {
+                line.points[j] = first_pos;
+                line.velocity[j] = zero_vel;
+                line.temperature[j] = first_temp;
+                line.salinity[j] = first_sal;
+            }
+        }
+        else if (k < original_len) {
+            // Case: NaN appears in the middle (at index k)
+            // Keep points[0..k-1] as is, fill points[k..end] with points[k-1] and velocity=0
+            CartesianCoord last_valid_pos = line.points[k - 1];
+            CartesianCoord zero_vel = {0.0, 0.0, 0.0};
+            double last_temp = line.temperature[k - 1];
+            double last_sal = line.salinity[k - 1];
+
+            // Set velocity at index k-1 to 0 (since the next step would be invalid)
+            line.velocity[k - 1] = zero_vel;
+
+            for (size_t j = k; j < original_len; ++j) {
+                line.points[j] = last_valid_pos;
+                line.velocity[j] = zero_vel;
+                line.temperature[j] = last_temp;
+                line.salinity[j] = last_sal;
+            }
+        }
+        // else: k == original_len, all points are valid, no changes needed
 
         // Update lastPoint
         line.lastPoint = line.points.back();
@@ -982,9 +1006,9 @@ std::vector<TrajectoryLine> MPASOVisualizer::removeNaNTrajectoriesAndReindex(std
         // Reindex ID
         line.lineID = new_id++;
 
-        cleaned.push_back(line); // Copy/move a clean trajectory
+        cleaned.push_back(line);
     }
-
+    
     return cleaned;
 }
 
@@ -1462,9 +1486,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
             }
         }
     });
-    std::cout << "traj size " << trajectory_lines.size() << std::endl; 
     auto clean_traj = removeNaNTrajectoriesAndReindex(trajectory_lines);
-    // std::cout << "clean traj size " << clean_traj.size() << std::endl;
     trajectory_lines.clear();
     return clean_traj;
     // return trajectory_lines;
@@ -1484,10 +1506,6 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(MPASOField* mpasoF, std::v
     update_vels.resize(stable_points.size() * (config->simulationDuration / config->recordT));
     if (!update_attrs.empty()) update_attrs.clear();
     update_attrs.resize(stable_points.size() * (config->simulationDuration / config->recordT));
-
-
-    std::cout << "points.size = " << stable_points.size() 
-          << ", default_cell_id.size = " << default_cell_id.size() << std::endl;
 
     std::vector<TrajectoryLine> trajectory_lines;
     trajectory_lines.resize(stable_points.size());
@@ -2114,9 +2132,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(MPASOField* mpasoF, std::v
     });
 
     // return trajectory_lines;
-    std::cout << "traj size " << trajectory_lines.size() << std::endl; 
     auto clean_traj = removeNaNTrajectoriesAndReindex(trajectory_lines);
-    // std::cout << "clean traj size " << clean_traj.size() << std::endl;
     trajectory_lines.clear();
     return clean_traj;
 }

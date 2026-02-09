@@ -1,6 +1,7 @@
 #pragma once
 #include "ggl.h"
 #include <utility>
+#include "Log.hpp"
 
 inline int toIntYMD(const std::string& s) 
 {
@@ -56,7 +57,7 @@ inline std::vector<std::string> getFilesWithPrefix(const std::string& folder, co
     }
     catch (const std::exception& e)
     {
-        std::cout << "[ERROR]::getFilesWithPrefix: " <<e.what() << std::endl;
+        Debug("[ERROR]::getFilesWithPrefix: %s", e.what());
     }
 
     if (sortFn)
@@ -97,7 +98,7 @@ inline std::string createDataPath(const std::string& basePath, const std::string
 	if (!fs::exists(dirPath))
 	{
 		fs::create_directories(dirPath);
-		MOPS::Debug("[Data]::Created directory: %s", dirPath.c_str());
+		Debug("[Data]::Created directory: %s", dirPath.c_str());
 	}
 	return dirPath;
 }

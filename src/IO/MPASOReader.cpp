@@ -35,7 +35,7 @@ MPASOReader::~MPASOReader()
 void MPASOReader::readData(const char* nc_filename)
 {
 
-    std::cout << nc_filename << std::endl;
+    Debug("[MPASOReader]::readData: %s", nc_filename);
     int ncid, err, dimid;
     size_t tmp;
 
@@ -92,7 +92,7 @@ void MPASOReader::readData(const char* nc_filename)
 void MPASOReader::readSol(const char* nc_filename)
 {
 
-    std::cout << nc_filename << std::endl;
+    Debug("[MPASOReader]::readSol: %s", nc_filename);
     int ncid, err, dimid;
     size_t tmp;
 
@@ -202,7 +202,7 @@ MPASOReader::Ptr MPASOReader::readSolData(const std::string& yaml_path, const st
     std::vector<char> time_vec_s;
     std::vector<char> time_vec_e;
    
-    std::cout << "          [ MPASOReader::readSolData::timestep = " << timestep << " ]\n";
+    Debug("[MPASOReader]::readSolData::timestep = %d", timestep);
     copyFromNdarray_Double(gs.get(), "bottomDepth", reader->cellBottomDepth_vec);
     copyFromNdarray_Double(gs.get(), "seaSurfaceHeight", reader->cellSurfaceHeight_vec);
     copyFromNdarray_Double(gs.get(), "velocityZonal", reader->cellZonalVelocity_vec);
@@ -244,7 +244,7 @@ void MPASOReader::appendSolData(MPASOReader* reader, const std::string& yaml_pat
     auto gs = reader->mStream->read(timestep);
     std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> time_span = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1);
-    std::cout << "Reading time: " << time_span.count() << " seconds." << std::endl;
+    Debug("[MPASOReader]::Reading time: %.6f seconds", time_span.count());
 
     reader->mTimesteps = timestep;
     if (reader->mTimesteps < 0)
@@ -262,7 +262,7 @@ void MPASOReader::appendSolData(MPASOReader* reader, const std::string& yaml_pat
     std::vector<char> time_vec_s;
     std::vector<char> time_vec_e;
 
-    std::cout << "          [ MPASOReader::readSolData::timestep = " << timestep << " ]\n";
+    Debug("[MPASOReader]::appendSolData::timestep = %d", timestep);
     copyFromNdarray_Double(gs.get(), "bottomDepth", reader->cellBottomDepth_vec);
     copyFromNdarray_Double(gs.get(), "seaSurfaceHeight", reader->cellSurfaceHeight_vec);
     copyFromNdarray_Double(gs.get(), "velocityZonal", reader->cellZonalVelocity_vec);
@@ -362,7 +362,7 @@ void MPASOReader::copyFromNdarray_Vec3(ftk::ndarray_group* g, std::string xValue
     }
     else
     {
-        std::cout << "[MPASOReader]::Error: Missing data in ndarray_group for " << name << std::endl;
+        Error("[MPASOReader]::Missing data in ndarray_group for %s", name.c_str());
     }
 }
 
@@ -371,7 +371,7 @@ void MPASOReader::copyFromNdarray_Double(ftk::ndarray_group* g, std::string valu
 {
     if (g->has(value))
     {
-        std::cout << "====== " << value << " found [\u2713]" << std::endl;
+        Debug("[Ndarray]::%s found [✓]", value.c_str());
         auto tmp_get = g->get(value);
         // std::cout << "tmp_get = " << tmp_get.get() << std::endl;
         //  std::cout << "Actual type of tmp_get: " << typeid(*tmp_get).name() << std::endl;
@@ -418,7 +418,7 @@ void MPASOReader::copyFromNdarray_Char(ftk::ndarray_group* g, std::string value,
 {
     if (g->has(value))
     {
-        std::cout << "====== " << value << " found [\u2713]" << std::endl;
+        Debug("[Ndarray]::%s found [✓]", value.c_str());
         auto tmp_get = g->get(value);
         auto tmp_ptr = std::dynamic_pointer_cast<ftk::ndarray<char>>(g->get(value));
         if (tmp_ptr) // Check if the cast was successful
@@ -447,7 +447,7 @@ void MPASOReader::copyFromNdarray_Float(ftk::ndarray_group* g, std::string value
 {
     if (g->has(value))
     {
-        std::cout << "====== " << value << " found [\u2713]" << std::endl;
+        Debug("[Ndarray]::%s found [✓]", value.c_str());
         auto tmp_get = g->get(value);
        
         auto tmp_ptr = std::dynamic_pointer_cast<ftk::ndarray<float>>(g->get(value));
@@ -554,5 +554,5 @@ void MPASOReader::readFromBlock_IntBasedK(const std::string& filename, std::vect
     }
     file.close();
     K = k;
-    std::cout << "[MPASOReader]::Info: Loaded " << filename << " with " << dataSize << " entries and " << k << " components each." << std::endl;
+    Debug("[MPASOReader]::Loaded %s with %d entries and %d components each", filename.c_str(), dataSize, k);
 }

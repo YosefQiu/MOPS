@@ -1,4 +1,5 @@
 ﻿#include "Core/MPASOGrid.h"
+#include "Utils/Log.hpp"
 #include "Utils/Utils.hpp"
 #include <fstream>
 #include <unistd.h>
@@ -64,16 +65,16 @@ void MPASOGrid::initGrid_FromBin(const char* prefix)
     mVertLevels = 80;
     mVertLevelsP1 = 80;
 
-    std::cout << "mCellsSize size " << mCellsSize << std::endl;
-    std::cout << "mVertexSize size " << mVertexSize << std::endl;
-    std::cout << "mEdgesSize size " << mEdgesSize << std::endl;
-    std::cout << "mMaxEdgesSize size " << mMaxEdgesSize << std::endl;
-    std::cout << "mTimesteps size " << mTimesteps << std::endl;
-    std::cout << "mVertLevels size " << mVertLevels << std::endl;
-    std::cout << "mVertLevelsP1 size " << mVertLevelsP1 << std::endl;
-    std::cout << "cellsOnVertex_vec size " << cellsOnVertex_vec.size() << std::endl;
-    std::cout << "cellsOnCell_vec size " << cellsOnCell_vec.size() << std::endl;
-    std::cout << "verticesOnCell_vec size " << verticesOnCell_vec.size() << std::endl; 
+    Debug("[MPASOGrid]::mCellsSize = %d", mCellsSize);
+    Debug("[MPASOGrid]::mVertexSize = %d", mVertexSize);
+    Debug("[MPASOGrid]::mEdgesSize = %d", mEdgesSize);
+    Debug("[MPASOGrid]::mMaxEdgesSize = %d", mMaxEdgesSize);
+    Debug("[MPASOGrid]::mTimesteps = %d", mTimesteps);
+    Debug("[MPASOGrid]::mVertLevels = %d", mVertLevels);
+    Debug("[MPASOGrid]::mVertLevelsP1 = %d", mVertLevelsP1);
+    Debug("[MPASOGrid]::cellsOnVertex_vec size = %zu", cellsOnVertex_vec.size());
+    Debug("[MPASOGrid]::cellsOnCell_vec size = %zu", cellsOnCell_vec.size());
+    Debug("[MPASOGrid]::verticesOnCell_vec size = %zu", verticesOnCell_vec.size()); 
 
 
 }
@@ -102,7 +103,7 @@ void MPASOGrid::setGridAttribute(GridAttributeType type, int val)
             this->mVertLevelsP1 = val;
             break;
         default:
-            std::cout << "Error: Invalid GridAttributeType" << std::endl;
+            Error("[MPASOGrid]::Invalid GridAttributeType");
             break;
     }
 }
@@ -246,7 +247,7 @@ void MPASOGrid::initGrid(ftk::ndarray_group* g, MPASOReader* reader)
 void MPASOGrid::createKDTree(const char* kdTree_path, sycl::queue& SYCL_Q)
 {
 #if _WIN32 || __linux__
-    std::cout << "kDTree Path: " << kdTree_path << std::endl;
+    Debug("[MPASOGrid]::KDTree Path: %s", kdTree_path);
     std::ifstream f_in(kdTree_path, std::ifstream::binary);
     if (!f_in)
     {

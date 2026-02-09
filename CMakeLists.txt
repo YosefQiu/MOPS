@@ -1,18 +1,25 @@
 cmake_minimum_required(VERSION 3.12 FATAL_ERROR)
 project(MOPS VERSION 0.1.0)
 
-option(MOPS_TESTING       "Enable test builds"                    OFF)
+option(MOPS_TESTING       "Enable test builds"                    ON)
 option(MOPS_PYTHON        "Enable Python bindings (tools/pyMOPS)" ON)
 option(MOPS_TUTORIAL      "Enable MOPS Tutorial examples"         ON)
 option(MOPS_VTK           "Enable VTK-based visualization and IO" ON) 
 option(MOPS_MPI           "Enable MPI support"                    OFF)
 option(MOPS_CLI           "Enable CLI support"                    ON)
+option(MOPS_DEBUG         "Enable debug logging"                  OFF)
 
 set(BUILD_SHARED_LIBS ON)
 set(CMAKE_C_COMPILER icpx)
 set(CMAKE_CXX_COMPILER icpx)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE INTERNAL "") 
 
+
+if (MOPS_DEBUG)
+  add_compile_definitions(_DEBUG=1)
+else()
+  add_compile_definitions(_DEBUG=0)
+endif()
 
 if (MOPS_VTK)
   add_compile_definitions(MOPS_VTK=1)
@@ -67,6 +74,31 @@ find_package(netCDF REQUIRED)
 find_package(ndarray REQUIRED)
 find_package(TBB REQUIRED)
 
+# Get Git revision if available
+find_package(Git QUIET)
+if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE SHORT_SHA
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(SHORT_SHA)
+        set(REVISION ${SHORT_SHA} CACHE STRING "git short sha" FORCE)
+    else()
+        set(REVISION "unknown")
+    endif()
+else()
+    message(STATUS "Git not found or not a git repository, using default version")
+    set(REVISION "unknown")
+endif()
+
+set(PROJECT_VERSION_ ${REVISION})
+
+# generate version.h
+include_directories(${CMAKE_BINARY_DIR})
+configure_file("${CMAKE_SOURCE_DIR}/src/version.h.in" "${CMAKE_BINARY_DIR}/version.h" @ONLY)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}-fsycl -Wdeprecated-declarations -fsycl-targets=nvptx64-nvidia-cuda")
 set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "" FORCE)
@@ -95,18 +127,6 @@ target_include_directories(${PROJECT_NAME}
     $<INSTALL_INTERFACE:include>
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/src>
-)
-
-# Ensure SYCL offloading flags are applied to the core library as well
-target_compile_options(${PROJECT_NAME} PRIVATE
-  -fsycl
-  -fsycl-targets=nvptx64-nvidia-cuda
-  -Wdeprecated-declarations
-)
-target_link_options(${PROJECT_NAME} PRIVATE
-  -fsycl
-  -fsycl-targets=nvptx64-nvidia-cuda
-  -Wdeprecated-declarations
 )
 
 target_link_libraries(${PROJECT_NAME} PUBLIC
@@ -163,7 +183,7 @@ endif()
 
 add_library(${PROJECT_NAME}::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
 
-message(STATUS "========== MOPS Configuration Summary ==========")
+message(STATUS "========== MOPS_Tutorial Configuration Summary ==========")
 message(STATUS "Project Name          : ${PROJECT_NAME}")
 message(STATUS "Project Version       : ${PROJECT_VERSION}")
 message(STATUS "Compiler              : ${CMAKE_CXX_COMPILER}")
@@ -176,6 +196,7 @@ message(STATUS "ENABLE_PYTHON         : ${MOPS_PYTHON}")
 message(STATUS "ENABLE_TESTING        : ${MOPS_TESTING}")
 message(STATUS "ENABLE_TUTORIAL       : ${MOPS_TUTORIAL}")
 message(STATUS "ENABLE_MPI            : ${MOPS_MPI}")
+message(STATUS "ENABLE_DEBUG          : ${MOPS_DEBUG}")
 
 # Dependency status
 if(MOPS_VTK)

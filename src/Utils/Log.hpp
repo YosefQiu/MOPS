@@ -4,10 +4,9 @@
 #include <mutex>
 #include <vector>
 
-#define _DEBUG 1
 #define MAX_PATH_FOR_LOG	256
 #define MAX_LOG_LENGTH		10240
-#define RELEASE (!_DEBUG)
+// #define RELEASE (!_DEBUG)
 
 namespace MOPS
 {
@@ -21,14 +20,32 @@ namespace MOPS
     void SetEngineErrorReporter(void(*foo)(const char* msg));
     void ReportEngineError(const char* msg);
 
+    inline void Debug(const char* format, ...)
+    {
     #if _DEBUG
-    #define Debug(f,...) DebugLog(__FILE__,__LINE__,f,##__VA_ARGS__)
+        if (!format || std::strlen(format) == 0) return;
+
+        char szBuffer[MAX_LOG_LENGTH];
+        std::memset(szBuffer, 0, MAX_LOG_LENGTH);
+
+        va_list l_va;
+        va_start(l_va, format);
+        std::vsnprintf(szBuffer, sizeof(szBuffer), format, l_va);
+        va_end(l_va);
+        WriteLog("[DEBUG] ", "", 0, szBuffer);
     #else
-    #define Debug(f,...)
+        (void)format;
     #endif
-    #define Error(f,...) ErrorLog(__FILE__,__LINE__,f,##__VA_ARGS__)
-    #define Info(f,...) InfoLog(__FILE__,__LINE__,f,##__VA_ARGS__)
-    #define errorC(f,...) EditorErrorLog(__FILE__,__LINE__,f,##__VA_ARGS__)
+    }
+
+    #if _DEBUG
+    #define Debug(...) MOPS::Debug(__VA_ARGS__)
+    #else
+    #define Debug(...) MOPS::Debug(__VA_ARGS__)
+    #endif
+    #define Error(f,...) MOPS::ErrorLog(__FILE__,__LINE__,f,##__VA_ARGS__)
+    #define Info(f,...) MOPS::InfoLog(__FILE__,__LINE__,f,##__VA_ARGS__)
+    #define errorC(f,...) MOPS::EditorErrorLog(__FILE__,__LINE__,f,##__VA_ARGS__)
     #define DebugLambda(lambda) lambda()
 
     class EngineLog
