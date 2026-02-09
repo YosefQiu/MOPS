@@ -534,6 +534,7 @@ class MOPSPathline:
         self._first_round = True
         # The (scalar) depth used for trajectory configuration (meters, positive downward)
         self._depth = None
+        self._particle_depths = None  # NEW: (N,) array for per-particle depths
         self._last_pt = None  # (N,3) np.ndarray, last point of each particle
         self._one_min = 60
         # Two solution buffers for time interpolation (A: current, B: next)
@@ -655,7 +656,8 @@ class MOPSPathline:
     # -------------------------------------------------------------------------
     def set_seed(
         self,
-        depth: float,
+        depth: float = None,
+        depths: np.ndarray | list | None = None,  # NEW: per-particle depths (N,)
         lat_range: tuple = None,
         lon_range: tuple = None,
         grid: tuple = (2, 2),
@@ -664,16 +666,29 @@ class MOPSPathline:
     ):
         """
         Two usages:
-        A) Give lat/lon + grid (internally use MOPS to generate sampling)
-        B) Directly give the Cartesian coordinates of points (N,3)
-        follow_last: If True, the first seed will be replaced by the last point of the previous segment (default True)
-        IMPORTANT:
-          If you change depth group and want an independent run, call reset_segments(),
-          otherwise `_first_round` may remain False and cause
-          the next run() to continue from previous depth's `_last_pt`.
+        A) Give lat/lon + grid (internally use MOPS to generate sampling) - uses uniform depth
+        B) Directly give the Cartesian coordinates of points (N,3) + optional per-particle depths
+        
+        Parameters:
+          depth: scalar depth for uniform mode (meters, positive downward)
+          depths: (N,) array of per-particle depths (meters, positive downward)
+                  If provided, each particle uses its own depth for velocity interpolation.
+          points: (N,3) Cartesian coordinates of seed points
+          follow_last: If True, continue from last positions of previous segment
+          
+        Note: If both 'depth' and 'depths' are provided, 'depths' takes precedence.
         """
-        self._depth = float(depth)
         self._follow_last = bool(follow_last)
+
+        # Handle depth(s)
+        if depths is not None:
+            self._particle_depths = np.asarray(depths, dtype=np.float32).flatten()
+            self._depth = float(self._particle_depths[0])  # fallback
+        elif depth is not None:
+            self._depth = float(depth)
+            self._particle_depths = None
+        else:
+            raise ValueError("must provide either 'depth' (scalar) or 'depths' (array)")
 
         if points is not None:
             arr = np.asarray(points, dtype=float)
@@ -681,9 +696,16 @@ class MOPSPathline:
                 raise ValueError("points must be a (N,3) array")
             self._seed_points = arr.copy()
             self._seed_conf = None
+            
+            # Validate depths array length if provided
+            if self._particle_depths is not None:
+                if len(self._particle_depths) != arr.shape[0]:
+                    raise ValueError(f"depths length ({len(self._particle_depths)}) must match points count ({arr.shape[0]})")
         else:
             if not (lat_range and lon_range):
                 raise ValueError("when points is None, must provide lat_range & lon_range")
+            if self._particle_depths is not None:
+                raise ValueError("per-particle depths only supported when providing explicit points")
             nx, ny = grid
             conf = pyMOPS.SeedsSettings()
             conf.setSeedsRange((int(nx), int(ny)))
@@ -765,12 +787,16 @@ class MOPSPathline:
                         
             # trajectory config
             cfg = pyMOPS.TrajectorySettings()
-            cfg.depth        = self._depth
+            cfg.depth        = self._depth  # fallback depth
             cfg.deltaT       = int(delta_minutes) * self._one_min
             cfg.simulationDuration = gap_sec
             cfg.recordT      = int(record_every_minutes) * self._one_min
             cfg.directionType= dir_flag
             cfg.methodType   = method_flag
+            
+            # Set per-particle depths if available
+            if hasattr(self, '_particle_depths') and self._particle_depths is not None:
+                cfg.particle_depths = self._particle_depths.tolist()
 
             # Run a segment
             seg = pyMOPS.MOPS_RunPathLine(cfg, seeds)

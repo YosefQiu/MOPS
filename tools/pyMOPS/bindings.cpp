@@ -243,12 +243,14 @@ PYBIND11_MODULE(pyMOPS, m) {
     py::class_<MOPS::TrajectorySettings>(m, "TrajectorySettings")
         .def(py::init<>())
         .def_readwrite("depth", &MOPS::TrajectorySettings::depth)
+        .def_readwrite("particle_depths", &MOPS::TrajectorySettings::particle_depths)  // NEW: per-particle depths
         .def_readwrite("deltaT", &MOPS::TrajectorySettings::deltaT)
         .def_readwrite("simulationDuration", &MOPS::TrajectorySettings::simulationDuration)
         .def_readwrite("recordT", &MOPS::TrajectorySettings::recordT)
         .def_readwrite("directionType", &MOPS::TrajectorySettings::directionType)
         .def_readwrite("methodType", &MOPS::TrajectorySettings::methodType)
-        .def_readwrite("fileName", &MOPS::TrajectorySettings::fileName);
+        .def_readwrite("fileName", &MOPS::TrajectorySettings::fileName)
+        .def("hasPerParticleDepths", &MOPS::TrajectorySettings::hasPerParticleDepths);  // NEW: helper method
     
     py::class_<CartesianCoord>(m, "CartesianCoord")
         .def(py::init<>())
@@ -420,6 +422,7 @@ PYBIND11_MODULE(pyMOPS, m) {
                 py_line["temperature"] = std::move(tem);
                 py_line["salinity"] = std::move(sal);
                 py_line["lastPoint"] = std::move(last_pt);
+                py_line["depth"] = ln.depth;  // per-particle depth
                 out.append(py_line);
             }
 

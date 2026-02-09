@@ -8,6 +8,8 @@
 #include <unistd.h>
 #include "ndarray/ndarray_group_stream.hh"
 #include "netcdf.h"
+#include "Utils/ScopedStderrSilence.hpp"
+
 
 using namespace MOPS;
 #define NC_CHECK(err) \
@@ -125,6 +127,7 @@ MPASOReader::Ptr MPASOReader::readMPASO(const std::string& yaml_path, int timest
 
 MPASOReader::Ptr MPASOReader::readGridData(const std::string& yaml_path)
 {
+    ScopedStderrSilence mute; 
     MOPS_TIMER_START("IO::readGridData", TimerCategory::IO_Read);
     
     std::shared_ptr<MPASOReader> reader(new MPASOReader(yaml_path));
@@ -167,6 +170,7 @@ MPASOReader::Ptr MPASOReader::readGridData(const std::string& yaml_path)
 
 MPASOReader::Ptr MPASOReader::readSolData(const std::string& yaml_path, const std::string& data_name, const int& timestep)
 {
+    ScopedStderrSilence mute; 
     MOPS_TIMER_START("IO::readSolData", TimerCategory::IO_Read);
     
     std::shared_ptr<MPASOReader> reader(new MPASOReader(yaml_path));

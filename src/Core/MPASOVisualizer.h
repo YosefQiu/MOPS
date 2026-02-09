@@ -90,10 +90,14 @@ namespace MOPS
         size_t deltaT;              // How many seconds to calculate the new position?
         size_t simulationDuration;  // Total simulation duration in seconds
         size_t recordT;             // How many seconds between recording new positions
-        float depth;
+        float depth;                // Default depth if particle_depths is empty
+        std::vector<float> particle_depths;  // NEW: Per-particle depth (meters, positive downward)
         std::string fileName;
         CalcDirection directionType = CalcDirection::kForward;
         CalcMethodType methodType = CalcMethodType::kEuler;
+        
+        // Helper: check if per-particle depths are enabled
+        bool hasPerParticleDepths() const { return !particle_depths.empty(); }
     };
 
     class MPASOVisualizer

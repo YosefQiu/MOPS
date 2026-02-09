@@ -1027,13 +1027,25 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
    
     std::vector<TrajectoryLine> trajectory_lines;
     trajectory_lines.resize(stable_points.size());
+    
+    // Prepare per-particle depths: use particle_depths if provided, otherwise use default depth
+    std::vector<float> effective_depths(stable_points.size());
+    bool bPerParticleDepth = config->hasPerParticleDepths() && config->particle_depths.size() == stable_points.size();
+    if (bPerParticleDepth) {
+        effective_depths = config->particle_depths;
+        Debug("[StreamLine] Using per-particle depths (%zu particles)", stable_points.size());
+    } else {
+        std::fill(effective_depths.begin(), effective_depths.end(), config->depth);
+        Debug("[StreamLine] Using uniform depth: %.2f meters", config->depth);
+    }
+    
     tbb::parallel_for(size_t(0), stable_points.size(), [&](size_t i) {
         trajectory_lines[i].lineID = i;
         trajectory_lines[i].points.push_back(stable_points[i]);
         trajectory_lines[i].lastPoint = stable_points[i];
         trajectory_lines[i].duration = config->simulationDuration;
         trajectory_lines[i].timestamp = config->deltaT;
-        trajectory_lines[i].depth = config->depth;
+        trajectory_lines[i].depth = effective_depths[i];  // Use per-particle depth
     });
 
    
@@ -1068,6 +1080,11 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
     sycl::buffer<double, 1> cellVertexZTop_buf(mpasoF->mSol_Front->cellVertexZTop_vec.data(),           sycl::range<1>(mpasoF->mSol_Front->cellVertexZTop_vec.size()));
 #pragma endregion sycl_buffer_velocity   
 
+#pragma region sycl_buffer_particle_depths
+    // Per-particle depth buffer for GPU kernel
+    sycl::buffer<float, 1> particle_depths_buf(effective_depths.data(), sycl::range<1>(effective_depths.size()));
+#pragma endregion sycl_buffer_particle_depths
+
     sycl::buffer<int, 1>    cellID_buf(default_cell_id.data(),      sycl::range<1>(default_cell_id.size()));
     sycl::buffer<vec3, 1>   wirte_points_buf(update_points.data(),  sycl::range<1>(update_points.size()));
     sycl::buffer<vec3, 1>   write_vels_buf(update_vels.data(),      sycl::range<1>(update_vels.size()));
@@ -1097,13 +1114,16 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
         auto acc_write_vels_buf     = write_vels_buf.get_access<sycl::access::mode::write>(cgh);
         auto acc_sample_points_buf  = sample_points_buf.get_access<sycl::access::mode::read_write>(cgh);
 
+        // Access per-particle depth buffer
+        auto acc_particle_depths_buf = particle_depths_buf.get_access<sycl::access::mode::read>(cgh);
+
         sycl::stream out(4096, 256, cgh);
         int times               = config->simulationDuration / config->deltaT;
         int each_points_size    = config->simulationDuration / config->recordT;
         int recordT             = config->recordT;
         int dt_sign             = config->directionType == MOPS::CalcDirection::kForward ? 1 : -1;
         int deltaT              = dt_sign * config->deltaT;
-        float config_depth      = config->depth;
+        // float config_depth   = config->depth;  // REMOVED: now using per-particle depths
         bool bEulerMethod       = config->methodType == MOPS::CalcMethodType::kEuler ? true : false;
 
         
@@ -1124,7 +1144,8 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
             const int MAX_VERTEX_NEIGHBOR_NUM           = 3;
 
 
-            double fixed_depth      = -1.0 * (double)config_depth;
+            // Use per-particle depth (negative because MPASO uses z-up coordinate)
+            double fixed_depth      = -1.0 * (double)acc_particle_depths_buf[global_id];
             double runTime          = 0.0;
             bool bFirstLoop         = true;
             bool bFirstVel          = true;
@@ -1509,13 +1530,25 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(MPASOField* mpasoF, std::v
 
     std::vector<TrajectoryLine> trajectory_lines;
     trajectory_lines.resize(stable_points.size());
+    
+    // Prepare per-particle depths: use particle_depths if provided, otherwise use default depth
+    std::vector<float> effective_depths(stable_points.size());
+    bool bPerParticleDepth = config->hasPerParticleDepths() && config->particle_depths.size() == stable_points.size();
+    if (bPerParticleDepth) {
+        effective_depths = config->particle_depths;
+        Debug("[PathLine] Using per-particle depths (%zu particles)", stable_points.size());
+    } else {
+        std::fill(effective_depths.begin(), effective_depths.end(), config->depth);
+        Debug("[PathLine] Using uniform depth: %.2f meters", config->depth);
+    }
+    
     tbb::parallel_for(size_t(0), stable_points.size(), [&](size_t i) {
         trajectory_lines[i].lineID = i;
         trajectory_lines[i].points.push_back(stable_points[i]);
         trajectory_lines[i].lastPoint = stable_points[i];
         trajectory_lines[i].duration = config->simulationDuration;
         trajectory_lines[i].timestamp = config->deltaT;
-        trajectory_lines[i].depth = config->depth;
+        trajectory_lines[i].depth = effective_depths[i];  // Use per-particle depth
     });
 
    
@@ -1579,6 +1612,11 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(MPASOField* mpasoF, std::v
 
     #pragma endregion sycl_buffer_double_attributes
 
+#pragma region sycl_buffer_particle_depths
+    // NEW: Per-particle depth buffer for GPU kernel
+    sycl::buffer<float, 1> particle_depths_buf(effective_depths.data(), sycl::range<1>(effective_depths.size()));
+#pragma endregion sycl_buffer_particle_depths
+
     sycl::buffer<int, 1>    cellID_buf(default_cell_id.data(),      sycl::range<1>(default_cell_id.size()));
     sycl::buffer<vec3, 1>   wirte_points_buf(update_points.data(),  sycl::range<1>(update_points.size()));
     sycl::buffer<vec3, 1>   write_vels_buf(update_vels.data(),      sycl::range<1>(update_vels.size()));
@@ -1629,13 +1667,16 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(MPASOField* mpasoF, std::v
         auto acc_write_attrs_buf   = write_attrs_buf.get_access<sycl::access::mode::write>(cgh);
         auto acc_sample_points_buf  = sample_points_buf.get_access<sycl::access::mode::read_write>(cgh);
 
+        // NEW: Access per-particle depth buffer
+        auto acc_particle_depths_buf = particle_depths_buf.get_access<sycl::access::mode::read>(cgh);
+        
         sycl::stream out(4096, 256, cgh);
         int n_steps             = config->simulationDuration / config->deltaT;
         int each_points_size    = config->simulationDuration / config->recordT;
         int recordT             = config->recordT;
         int dt_sign             = config->directionType == MOPS::CalcDirection::kForward ? 1 : -1;
         int deltaT              = dt_sign * config->deltaT;
-        float config_depth      = config->depth;
+        // float config_depth   = config->depth;  // REMOVED: now using per-particle depths
         bool bEulerMethod       = config->methodType == MOPS::CalcMethodType::kEuler ? true : false;
 
         
@@ -1655,7 +1696,8 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(MPASOField* mpasoF, std::v
             const int MAX_VERTICAL_LEVEL_NUM            = 80;
             const int MAX_VERTEX_NEIGHBOR_NUM           = 3;
 
-            double fixed_depth                          = -1.0 * (double)config_depth;
+            // NEW: Use per-particle depth (negative because MPASO uses z-up coordinate)
+            double fixed_depth                          = -1.0 * (double)acc_particle_depths_buf[global_id];
             double runTime                              = 0.0;
             bool bFirstLoop                             = true;
             bool bFirstVel                              = true;

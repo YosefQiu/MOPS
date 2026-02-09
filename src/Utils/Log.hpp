@@ -19,6 +19,7 @@ namespace MOPS
 
     void SetEngineErrorReporter(void(*foo)(const char* msg));
     void ReportEngineError(const char* msg);
+    void WriteLog(const char* tag, const char* file, int nLine, const char* szLogContent);
 
     inline void Debug(const char* format, ...)
     {

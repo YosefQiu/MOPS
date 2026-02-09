@@ -8,7 +8,16 @@
 
 using namespace MOPS;
 
-int total_particles = 0;
+// ============================================================================
+// Depth Mode Configuration
+// ============================================================================
+// Define USE_PER_PARTICLE_DEPTH to enable per-particle depth tracking.
+// When defined: each particle uses its own depth extracted from XYZ coordinates.
+// When NOT defined: all particles use the same fixed_depth value.
+// ============================================================================
+#define USE_PER_PARTICLE_DEPTH  // Comment out this line for uniform depth mode
+
+
 
 struct LatLonDepth {
     double lat;    // degrees
@@ -16,8 +25,8 @@ struct LatLonDepth {
     double depth;  // meters (positive downward)
 };
 
-// Old timing system removed - now using MOPS timing system
 
+// helper functions
 LatLonDepth xyz_to_lat_lon_depth(double x, double y, double z)
 {
 	constexpr double EARTH_RADIUS2 = 6371000.0; // meters
@@ -61,13 +70,24 @@ CartesianCoord make_same_lat_depth_diff_lon(const CartesianCoord& p,
     return lat_lon_depth_to_xyz(lld.lat, lld.lon, lld.depth);
 }
 
-
+int total_particles = 0;
 std::vector<CartesianCoord> lastPts_vec;
+std::vector<float> lastDepths_vec;  
 float fixed_depth = 10.261f;
+
+// ============================================================================
+// Per-Particle Depth Configuration (only used when USE_PER_PARTICLE_DEPTH is defined)
+// ============================================================================
+// Define the depth range for particles. Depths will be linearly distributed.
+float depth_min = 10.0f;    // Minimum depth (meters)
+float depth_max = 500.0f;   // Maximum depth (meters)
+// ============================================================================
 
 void tutorial_pathLine(const std::string name_prefix, float fixed_depth, bool isFirstPts, int day_gap)
 {
-	std::vector<CartesianCoord> sample_points; 
+	std::vector<CartesianCoord> sample_points;
+	std::vector<float> sample_depths;  
+	
 	if (isFirstPts)
 	{
 		Debug("== generate sample points ==");
@@ -82,6 +102,29 @@ void tutorial_pathLine(const std::string name_prefix, float fixed_depth, bool is
 			sampling_conf = nullptr;
 		}
 		total_particles = static_cast<int>(sample_points.size());
+		
+#ifdef USE_PER_PARTICLE_DEPTH
+		// Per-particle depth mode: assign different depths to particles
+		// The sample_points are generated at fixed_depth, but we will override
+		// the depth used in GPU kernel with linearly distributed depths.
+		sample_depths.resize(sample_points.size());
+		for (size_t i = 0; i < sample_points.size(); i++) {
+			// Linearly interpolate depth from depth_min to depth_max
+			float t = (sample_points.size() > 1) 
+			        ? static_cast<float>(i) / static_cast<float>(sample_points.size() - 1)
+			        : 0.0f;
+			sample_depths[i] = depth_min + t * (depth_max - depth_min);
+			
+			// Also update the XYZ coordinates to match the new depth
+			auto lld = xyz_to_lat_lon_depth(sample_points[i].x(), sample_points[i].y(), sample_points[i].z());
+			sample_points[i] = lat_lon_depth_to_xyz(lld.lat, lld.lon, sample_depths[i]);
+		}
+		Debug("[PER-PARTICLE DEPTH] Assigned depths from %.2f to %.2f meters (%zu particles)", 
+			depth_min, depth_max, sample_points.size());
+#else
+		// Uniform depth mode: all particles use fixed_depth
+		Debug("[UNIFORM DEPTH] All particles using depth: %.2f meters", fixed_depth);
+#endif
 		// sample_points.clear();
 		// sample_points.resize(1);
         // sample_points[0] = CartesianCoord{ 4472513.01895255, -293143.99074839, 4521395.00861939}; 
@@ -97,10 +140,20 @@ void tutorial_pathLine(const std::string name_prefix, float fixed_depth, bool is
 			if (lastPts_vec.size() != 0)
 			{
 				sample_points.resize(lastPts_vec.size());
+#ifdef USE_PER_PARTICLE_DEPTH
+				sample_depths.resize(lastPts_vec.size());
+#endif
 				for (auto idx = 0; idx < lastPts_vec.size(); idx++)
 				{
 					sample_points[idx] = CartesianCoord{lastPts_vec[idx].x(), lastPts_vec[idx].y(), lastPts_vec[idx].z()};
+#ifdef USE_PER_PARTICLE_DEPTH
+					// Per-particle depth: restore from saved depths
+					sample_depths[idx] = lastDepths_vec[idx];
+#endif
 				}
+#ifdef USE_PER_PARTICLE_DEPTH
+				Debug("[PER-PARTICLE DEPTH] Restored %zu particles with saved depths", sample_points.size());
+#endif
 			}
 			else
 			{
@@ -113,7 +166,10 @@ void tutorial_pathLine(const std::string name_prefix, float fixed_depth, bool is
 	MOPS::TrajectorySettings* traj_conf = new MOPS::TrajectorySettings;
 	traj_conf->directionType = MOPS::CalcDirection::kForward;
 	traj_conf->methodType = MOPS::CalcMethodType::kEuler;
-	traj_conf->depth = fixed_depth;
+	traj_conf->depth = fixed_depth;  // Used in uniform depth mode or as fallback
+#ifdef USE_PER_PARTICLE_DEPTH
+	traj_conf->particle_depths = sample_depths;  // Per-particle depths
+#endif
 	traj_conf->deltaT = ONE_MINUTE * 10;			
 	traj_conf->simulationDuration = std::abs(day_gap);
 	traj_conf->recordT = ONE_DAY * 10;
@@ -123,6 +179,11 @@ void tutorial_pathLine(const std::string name_prefix, float fixed_depth, bool is
 	traj_conf->fileName = tiltle + direction_str;
 	
 	Debug("== multiple timesteps [pathline] ==");
+#ifdef USE_PER_PARTICLE_DEPTH
+	Debug("[MODE: PER-PARTICLE DEPTH] particles: %zu, depths: %zu", sample_points.size(), sample_depths.size());
+#else
+	Debug("[MODE: UNIFORM DEPTH] particles: %zu, depth: %.2f meters", sample_points.size(), fixed_depth);
+#endif
     
 
 	// GPU Kernel
@@ -137,9 +198,12 @@ void tutorial_pathLine(const std::string name_prefix, float fixed_depth, bool is
 		MOPS::VTKFileManager::SaveTrajectoryLinesAsVTP(lines, traj_conf->fileName);
 	}
 	
-	// save last pts to memory
+	// save last pts to memory (and depths for per-particle mode)
 	{
 		lastPts_vec.clear();
+#ifdef USE_PER_PARTICLE_DEPTH
+		lastDepths_vec.clear();
+#endif
 		std::vector<vec3> last_pts;
 		for (auto idx = 0; idx < lines.size(); idx++) 
 		{
@@ -160,8 +224,13 @@ void tutorial_pathLine(const std::string name_prefix, float fixed_depth, bool is
 				last_pts.push_back(pts.back());  // or CartesianCoord{0, 0, 0};
 			}
 		}
-		for (const auto& p : last_pts) {
+		for (size_t i = 0; i < last_pts.size(); i++) {
+			const auto& p = last_pts[i];
 			lastPts_vec.push_back(CartesianCoord{p.x(), p.y(), p.z()});
+#ifdef USE_PER_PARTICLE_DEPTH
+			// Save the depth for this particle (from the trajectory line)
+			lastDepths_vec.push_back(lines[i].depth);
+#endif
 		}
 	}
 	
