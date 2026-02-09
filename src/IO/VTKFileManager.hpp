@@ -4,6 +4,7 @@
 #include "Core/MPASOVisualizer.h"
 #include "Utils/Utils.hpp"
 #include "Utils/GeoConverter.hpp"
+#include "Utils/Timer.hpp"
 
 #if MOPS_VTK
 namespace MOPS
@@ -312,6 +313,8 @@ namespace MOPS
 		
 		static void SaveTrajectoryLinesAsVTP(const std::vector<TrajectoryLine>& lines, const std::string& outputFileName) 
 		{
+			MOPS_TIMER_START("IO::SaveVTP", TimerCategory::IO_Write);
+			
 			vtkSmartPointer<vtkPoints> all_points = vtkSmartPointer<vtkPoints>::New();
 			vtkSmartPointer<vtkCellArray> all_lines = vtkSmartPointer<vtkCellArray>::New();
 
@@ -405,6 +408,8 @@ namespace MOPS
 			writer->SetFileName(checkAndModifyExtension(outputFileName, "vtp").c_str());
 			writer->SetInputData(polydata);
 			writer->Write();
+			
+			MOPS_TIMER_STOP("IO::SaveVTP");
 		}
 
 	};

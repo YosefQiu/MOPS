@@ -1,6 +1,7 @@
 #include "IO/MPASOReader.h"
 #include "MPASOReader.h"
 #include "Utils/Utils.hpp"
+#include "Utils/Timer.hpp"
 #include <iostream>
 #include <memory>
 #include <string>
@@ -124,6 +125,8 @@ MPASOReader::Ptr MPASOReader::readMPASO(const std::string& yaml_path, int timest
 
 MPASOReader::Ptr MPASOReader::readGridData(const std::string& yaml_path)
 {
+    MOPS_TIMER_START("IO::readGridData", TimerCategory::IO_Read);
+    
     std::shared_ptr<MPASOReader> reader(new MPASOReader(yaml_path));
     reader->mStream = std::make_shared<ftk::stream>();
 	reader->mStream->parse_yaml(yaml_path);
@@ -157,13 +160,15 @@ MPASOReader::Ptr MPASOReader::readGridData(const std::string& yaml_path)
     Debug("%-40s = \t [ %d ]", "[MPASOReader]:: mMaxEdgesSize",  reader->mMaxEdgesSize);
     Debug("%-40s = \t [ %d ]", "[MPASOReader]:: mVertexSize",    reader->mVertexSize);
 
-
+    MOPS_TIMER_STOP("IO::readGridData");
     
     return reader;
 }
 
 MPASOReader::Ptr MPASOReader::readSolData(const std::string& yaml_path, const std::string& data_name, const int& timestep)
 {
+    MOPS_TIMER_START("IO::readSolData", TimerCategory::IO_Read);
+    
     std::shared_ptr<MPASOReader> reader(new MPASOReader(yaml_path));
     reader->mStream = std::make_shared<ftk::stream>();
     reader->mStream->parse_yaml(yaml_path); 
@@ -229,7 +234,7 @@ MPASOReader::Ptr MPASOReader::readSolData(const std::string& yaml_path, const st
     Debug("%-40s = \t [ %d ]", "[MPASOReader]:: mVertLevels", reader->mVertLevels);
     Debug("%-40s = \t [ %d ]", "[MPASOReader]:: mVertLevelsP1", reader->mVertLevelsP1);
 
-
+    MOPS_TIMER_STOP("IO::readSolData");
 
     return reader;
 }

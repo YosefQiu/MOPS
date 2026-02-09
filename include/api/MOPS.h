@@ -114,4 +114,37 @@ namespace MOPS
 
     std::shared_ptr<MPASOField> MOPS_GetFieldSnapshots();
 
+    // ========================================================================
+    // Timing API - for profiling internal MOPS operations
+    // ========================================================================
+
+    /**
+     * @brief Reset all timing data.
+     * Call this at the beginning of your program to start fresh.
+     */
+    void MOPS_ResetTiming();
+
+    /**
+     * @brief Print timing summary grouped by category.
+     * Shows total time for IO, Preprocessing, GPU Kernel, Memory Copy, etc.
+     */
+    void MOPS_PrintTimingSummary();
+
+    /**
+     * @brief Print detailed timing for each individual operation.
+     */
+    void MOPS_PrintTimingDetailed();
+
+    /**
+     * @brief Get total time spent in a specific category (in milliseconds).
+     * @param category One of: "IO_Read", "IO_Write", "Preprocessing", 
+     *                 "MemoryCopy", "GPUKernel", "CPUCompute", "Other"
+     */
+    double MOPS_GetCategoryTime(const char* category);
+
+    /**
+     * @brief Get total recorded time (in milliseconds).
+     */
+    double MOPS_GetTotalTime();
+
 }

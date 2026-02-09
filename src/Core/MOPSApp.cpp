@@ -1,4 +1,5 @@
 #include "Core/MOPSApp.h"
+#include "Utils/Timer.hpp"
 #include <vector>
 #include "version.h"
 
@@ -24,18 +25,25 @@ namespace MOPS
 
     void MOPSApp::addGrid(std::shared_ptr<MPASOGrid> grid)
     {
+		MOPS_TIMER_START("Preprocessing::addGrid", TimerCategory::Preprocessing);
+		
 		mpasoGrid = std::move(grid);
 		mpasoGrid->createKDTree((mpasoGrid->mCachedDataDir + "/" + "KDTree.bin").c_str(), mSYCLQueue);
 		mDataDir = mpasoGrid->mCachedDataDir;
 		Debug("[MOPSApp]::Finished loading grid information");
+		
+		MOPS_TIMER_STOP("Preprocessing::addGrid");
     }
 
     void MOPSApp::addSol(int solID, std::shared_ptr<MPASOSolution> sol)
     {
+		MOPS_TIMER_START("Preprocessing::addSol", TimerCategory::Preprocessing);
+		
 		// check if solID already exists
 		auto iter = mpasoAttributeMap.find(solID);
 		if (iter != mpasoAttributeMap.end())
 		{
+			MOPS_TIMER_STOP("Preprocessing::addSol");
 			return;
 		}
 
@@ -77,6 +85,8 @@ namespace MOPS
 		mpasoAttributeMap[solID] = mpasoSol;
 
 		Debug("[MOPSApp]::Total number of attributes: %zu", mpasoAttributeMap.size());
+		
+		MOPS_TIMER_STOP("Preprocessing::addSol");
     }
 
     void MOPSApp::addField()
@@ -158,6 +168,8 @@ namespace MOPS
 
     std::vector<TrajectoryLine> MOPSApp::runStreamLine(TrajectorySettings* config, std::vector<CartesianCoord>& sample_points)
     {
+		MOPS_TIMER_START("GPUKernel::StreamLine", TimerCategory::GPUKernel);
+		
     	std::vector<int> cell_id_vec;
 
 		mpasoField->calcInWhichCells(sample_points, cell_id_vec);
@@ -171,21 +183,27 @@ namespace MOPS
 		
 		auto lines = MPASOVisualizer::StreamLine(mpasoField.get(), sample_points, config, cell_id_vec, mSYCLQueue);
 		Debug("[MOPSApp]::StreamLine done");
+		
+		MOPS_TIMER_STOP("GPUKernel::StreamLine");
 		return lines;
 	}
 
 	std::vector<TrajectoryLine> MOPSApp::runPathLine(TrajectorySettings* config, std::vector<CartesianCoord>& sample_points)
 	{
+		MOPS_TIMER_START("GPUKernel::PathLine", TimerCategory::GPUKernel);
+		
 		// check if the SolFront and SolBack are set
 		if (mpasoField == nullptr)
 		{
 			Error("[MOPSApp]::mpasoField is nullptr, please activeAttribute first");
+			MOPS_TIMER_STOP("GPUKernel::PathLine");
 			exit(-1);
 		}
 
 		if (mpasoField->mSol_Front == nullptr || mpasoField->mSol_Back == nullptr)
 		{
 			Error("[MOPSApp]::Sol_Front or Sol_Back is nullptr, please activeAttribute first");
+			MOPS_TIMER_STOP("GPUKernel::PathLine");
 			exit(-1);
 		}
 
@@ -207,6 +225,8 @@ namespace MOPS
 			sample_points[sample_idx] = lines_i[sample_idx].lastPoint;
 		}
 		lines = lines_i;
+		
+		MOPS_TIMER_STOP("GPUKernel::PathLine");
 
 /*
 		for (auto idx = 0; idx + 1 < timestep_vec.size(); idx++)

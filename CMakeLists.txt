@@ -8,6 +8,7 @@ option(MOPS_VTK           "Enable VTK-based visualization and IO" ON)
 option(MOPS_MPI           "Enable MPI support"                    OFF)
 option(MOPS_CLI           "Enable CLI support"                    ON)
 option(MOPS_DEBUG         "Enable debug logging"                  OFF)
+option(MOPS_TIMING        "Enable internal timing profiler"       ON)
 
 set(BUILD_SHARED_LIBS ON)
 set(CMAKE_C_COMPILER icpx)
@@ -19,6 +20,10 @@ if (MOPS_DEBUG)
   add_compile_definitions(_DEBUG=1)
 else()
   add_compile_definitions(_DEBUG=0)
+endif()
+
+if (MOPS_TIMING)
+  add_compile_definitions(MOPS_ENABLE_TIMING=1)
 endif()
 
 if (MOPS_VTK)

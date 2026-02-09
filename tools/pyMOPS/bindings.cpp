@@ -428,4 +428,24 @@ PYBIND11_MODULE(pyMOPS, m) {
         py::arg("config"),
         py::arg("sample_points_np"),
         "Run pathline simulation");
+
+    // ========================================================================
+    // Timing API
+    // ========================================================================
+    m.def("MOPS_ResetTiming", &MOPS::MOPS_ResetTiming,
+        "Reset all timing data");
+
+    m.def("MOPS_PrintTimingSummary", &MOPS::MOPS_PrintTimingSummary,
+        "Print timing summary grouped by category (IO, Preprocessing, GPU Kernel, etc.)");
+
+    m.def("MOPS_PrintTimingDetailed", &MOPS::MOPS_PrintTimingDetailed,
+        "Print detailed timing for each individual operation");
+
+    m.def("MOPS_GetCategoryTime", &MOPS::MOPS_GetCategoryTime,
+        py::arg("category"),
+        "Get total time (ms) spent in a category. Valid categories: "
+        "'IO_Read', 'IO_Write', 'Preprocessing', 'MemoryCopy', 'GPUKernel', 'CPUCompute', 'Other'");
+
+    m.def("MOPS_GetTotalTime", &MOPS::MOPS_GetTotalTime,
+        "Get total recorded time in milliseconds");
 }

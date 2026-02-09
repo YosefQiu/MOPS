@@ -1,6 +1,8 @@
 #include "api/MOPS.h"
 #include "Core/MOPSApp.h"
+#include "Utils/Timer.hpp"
 #include <memory>
+#include <cstring>
 
 
 namespace MOPS 
@@ -81,6 +83,47 @@ namespace MOPS
     {
         return app.getField();
     }
-   
+
+    // ========================================================================
+    // Timing API implementation
+    // ========================================================================
+
+    void MOPS_ResetTiming()
+    {
+        TimerManager::instance().reset();
+    }
+
+    void MOPS_PrintTimingSummary()
+    {
+        TimerManager::instance().printSummary();
+    }
+
+    void MOPS_PrintTimingDetailed()
+    {
+        TimerManager::instance().printDetailed();
+    }
+
+    double MOPS_GetCategoryTime(const char* category)
+    {
+        if (strcmp(category, "IO_Read") == 0)
+            return TimerManager::instance().getCategoryTime(TimerCategory::IO_Read);
+        else if (strcmp(category, "IO_Write") == 0)
+            return TimerManager::instance().getCategoryTime(TimerCategory::IO_Write);
+        else if (strcmp(category, "Preprocessing") == 0)
+            return TimerManager::instance().getCategoryTime(TimerCategory::Preprocessing);
+        else if (strcmp(category, "MemoryCopy") == 0)
+            return TimerManager::instance().getCategoryTime(TimerCategory::MemoryCopy);
+        else if (strcmp(category, "GPUKernel") == 0)
+            return TimerManager::instance().getCategoryTime(TimerCategory::GPUKernel);
+        else if (strcmp(category, "CPUCompute") == 0)
+            return TimerManager::instance().getCategoryTime(TimerCategory::CPUCompute);
+        else
+            return TimerManager::instance().getCategoryTime(TimerCategory::Other);
+    }
+
+    double MOPS_GetTotalTime()
+    {
+        return TimerManager::instance().getTotalTime();
+    }
 
 }
