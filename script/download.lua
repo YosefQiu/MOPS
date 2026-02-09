@@ -156,6 +156,7 @@ if not should_skip("ndarray") and need_install("ndarray", {
 }) then
     run("rm -rf ndarray")
     run("git clone https://github.com/hguo/ndarray.git")
+    run("cd ndarray && git checkout 7eda716c2583020b1b8bd8cb9768c7b56d414d91")
     run("mkdir -p ndarray/build")
 
     run(string.format([[

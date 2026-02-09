@@ -26,3 +26,8 @@ build*
 .cache/*
 hdf5
 zlib
+tutorial/.data/
+tutorial/__pycache__/
+tutorial/ab_result_test/
+tutorial/pathLine_ab2.py
+tutorial/*.npy
