@@ -105,7 +105,7 @@ set(PROJECT_VERSION_ ${REVISION})
 include_directories(${CMAKE_BINARY_DIR})
 configure_file("${CMAKE_SOURCE_DIR}/src/version.h.in" "${CMAKE_BINARY_DIR}/version.h" @ONLY)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}-fsycl -Wdeprecated-declarations -fsycl-targets=nvptx64-nvidia-cuda")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -Wdeprecated-declarations -fsycl-targets=nvptx64-nvidia-cuda")
 set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "" FORCE)
 message(STATUS "CMAKE_C_COMPILER = ${CMAKE_C_COMPILER}")
 message(STATUS "CMAKE_CXX_COMPILER = ${CMAKE_CXX_COMPILER}")
