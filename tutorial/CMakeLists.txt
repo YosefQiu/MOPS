@@ -20,8 +20,10 @@ foreach(TUTORIAL_SRC ${TUTORIAL_SOURCES})
         -pthread -fsycl -fsycl-targets=nvptx64-nvidia-cuda -Wdeprecated-declarations
     )
     
-    vtk_module_autoinit(
+    if (MOPS_VTK)
+      vtk_module_autoinit(
         TARGETS ${TUTORIAL_NAME}
         MODULES ${VTK_LIBRARIES}
-    )
+      )
+    endif()
 endforeach()
