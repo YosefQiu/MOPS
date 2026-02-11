@@ -9,8 +9,9 @@ on:
 jobs:
   build-and-test:
     runs-on: self-hosted
-    env:
-      CI: true
+    defaults:
+      run:
+        shell: bash -l -c "source ~/intel/oneapi/2025.2/oneapi-vars.sh --force && bash {0}"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
