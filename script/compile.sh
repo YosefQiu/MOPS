@@ -39,3 +39,5 @@ cmake .. \
 
 make -j16
 make install
+
+export LD_LIBRARY_PATH=$INSTALL_DIR/lib:$INSTALL_DIR/lib64:$LD_LIBRARY_PATH

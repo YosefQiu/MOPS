@@ -219,6 +219,7 @@ MPASOReader::Ptr MPASOReader::readSolData(const std::string& yaml_path, const st
     copyFromNdarray_Double(gs.get(), "layerThickness", reader->cellLayerThickness_vec);
     copyFromNdarray_Double(gs.get(), "zTop", reader->cellZTop_vec);
     copyFromNdarray_Double(gs.get(), "normalVelocity", reader->cellNormalVelocity_vec);
+    copyFromNdarray_Double(gs.get(), "vertVelocityTop", reader->cellVertVelocity_vec);
     copyFromNdarray_Char(gs.get(), "xtime", time_vec_s);
     reader->mTimeStamp = std::string(time_vec_s.begin(), time_vec_s.end());
     
@@ -279,6 +280,7 @@ void MPASOReader::appendSolData(MPASOReader* reader, const std::string& yaml_pat
     copyFromNdarray_Double(gs.get(), "layerThickness", reader->cellLayerThickness_vec);
     copyFromNdarray_Double(gs.get(), "zTop", reader->cellZTop_vec);
     copyFromNdarray_Double(gs.get(), "normalVelocity", reader->cellNormalVelocity_vec);
+    copyFromNdarray_Double(gs.get(), "vertVelocityTop", reader->cellVertVelocity_vec);
     copyFromNdarray_Char(gs.get(), "xtime", time_vec_s);
     reader->mTimeStamp = std::string(time_vec_s.begin(), time_vec_s.end());
 

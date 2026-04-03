@@ -241,13 +241,13 @@ void tutorial_pathLine(const std::string name_prefix, float fixed_depth, bool is
 
 void IO()
 {
-    const char* yaml_path = "/pscratch/sd/q/qiuyf/MOPS_Tutorial/test_ab_climatology.yaml";
+    const char* yaml_path = "/pscratch/sd/q/qiuyf/MOPS_Tutorial/test.yaml";
 	int timestep = 0;
 	auto mpasoGrid = std::make_shared<MOPS::MPASOGrid>();
     auto solFront = std::make_shared<MOPS::MPASOSolution>();
 	auto solBack = std::make_shared<MOPS::MPASOSolution>();
 
-    auto pairs = MOPS_IO::make_forward_month_pairs(01, 1, 02, 12);
+    auto pairs = MOPS_IO::make_forward_month_pairs(15, 1, 15, 12);
     
 	{
         MOPS::MOPS_Init("gpu");

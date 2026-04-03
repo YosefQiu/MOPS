@@ -73,8 +73,12 @@ namespace MOPS
 			Debug("[MOPSApp]::Run calcCellVertexVelocity");
 			mpasoSol->calcCellVertexVelocity(mpasoGrid.get(), mDataDir, mSYCLQueue);
 		}
+		if (mpasoSol->cellVertexVertVelocity_vec.size() == 0)
+		{
+			Debug("[MOPSApp]::Run calcCellVertexVertVelocity");
+			mpasoSol->calcCellVertexVertVelocity(mpasoGrid.get(), mDataDir, mSYCLQueue);
+		}
 		
-
 		for (const auto& [name, vec] : mpasoSol->mDoubleAttributes)
 		{
 			Debug("[MOPSApp]::Run calcCellCenterToVertex for %s", name.c_str());

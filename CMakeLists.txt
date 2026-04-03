@@ -7,7 +7,7 @@ option(MOPS_TUTORIAL      "Enable MOPS Tutorial examples"         ON)
 option(MOPS_VTK           "Enable VTK-based visualization and IO" ON) 
 option(MOPS_MPI           "Enable MPI support"                    OFF)
 option(MOPS_CLI           "Enable CLI support"                    ON)
-option(MOPS_DEBUG         "Enable debug logging"                  OFF)
+option(MOPS_DEBUG         "Enable debug logging"                  ON)
 option(MOPS_TIMING        "Enable internal timing profiler"       ON)
 
 set(BUILD_SHARED_LIBS ON)

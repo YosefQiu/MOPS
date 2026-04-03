@@ -37,9 +37,10 @@ namespace MOPS
         int mVertLevelsP1;
 
         int mTotalZTopLayer;
+        int mTotalZTopLayerP1;
 
         // related velocity --> need to split a another class.
-        std::vector<vec3>		cellVelocity_vec;
+        std::vector<vec3>		cellVelocity_vec; // TODO looks not been used, need to check if it can be removed.
         std::vector<double>	    cellLayerThickness_vec;
         std::vector<double>     cellZTop_vec;
         std::vector<double>     cellVertVelocity_vec;
@@ -52,6 +53,7 @@ namespace MOPS
         std::vector<double>     cellVertexZTop_vec;
         std::vector<double>     cellVertexMeridionalVelocity_vec;
         std::vector<double>	 	cellVertexZonalVelocity_vec;
+        std::vector<double>     cellVertexVertVelocity_vec;
         std::vector<vec3>       cellCenterVelocity_vec;
         std::vector<vec3>       cellVertexVelocity_vec;
 
@@ -111,6 +113,7 @@ namespace MOPS
         void calcCellCenterVelocityByZM(MPASOGrid* grid, std::string& dataDir, sycl::queue& q);
         void calcCellVertexVelocity(MPASOGrid* grid, std::string& dataDir, sycl::queue& q);
         void calcCellVertexVelocityByZM(MPASOGrid* grid, std::string& dataDir, sycl::queue& q);
+        void calcCellVertexVertVelocity(MPASOGrid* grid, std::string& dataDir, sycl::queue& q);
     private:
         void readFromBlock_Vec3(const std::string& filename, std::vector<vec3>& vec);    
         void readFromBlock_Double(const std::string& filename, std::vector<double>& vec);

@@ -52,6 +52,7 @@ void MPASOSolution::initSolution(MPASOReader* reader)
     this->cellLayerThickness_vec = std::move(reader->cellLayerThickness_vec);
     this->cellZTop_vec = std::move(reader->cellZTop_vec);
     this->cellNormalVelocity_vec = std::move(reader->cellNormalVelocity_vec);
+    this->cellVertVelocity_vec = std::move(reader->cellVertVelocity_vec);
 
     mID.timeStamp = this->mTimeStamp;
     mID.timestep = this->mTimesteps;
@@ -67,7 +68,7 @@ void MPASOSolution::initSolution(MPASOReader* reader)
     // std::cout << "cellLayerThickness_vec size = " << this->cellLayerThickness_vec.size() << std::endl;
     // std::cout << "cellZTop_vec size = " << this->cellZTop_vec.size() << std::endl;
     // std::cout << "cellNormalVelocity_vec size = " << this->cellNormalVelocity_vec.size() << std::endl;
-
+    // std::cout << "cellVertVelocity_vec size = " << this->cellVertVelocity_vec.size() << std::endl;
 }
 
 void MPASOSolution::initSolution(ftk::ndarray_group* g, MPASOReader* reader)
@@ -95,7 +96,7 @@ void MPASOSolution::initSolution(ftk::ndarray_group* g, MPASOReader* reader)
     copyFromNdarray_Double(g, "layerThickness", this->cellLayerThickness_vec);
     copyFromNdarray_Double(g, "timeMonthly_avg_zTop", this->cellZTop_vec);
     copyFromNdarray_Double(g, "normalVelocity", this->cellNormalVelocity_vec);
-
+    copyFromNdarray_Double(g, "vertVelocityTop", this->cellVertVelocity_vec);
     mID.timeStamp = this->mTimeStamp;
     mID.timestep = this->mTimesteps;
    
@@ -554,9 +555,10 @@ void MPASOSolution::calcCellVertexZtop(MPASOGrid* grid, std::string& dataDir, sy
             SYCLKernel::GetCellVerticesIdx(cell_id, current_cell_vertices_number, current_cell_vertices_idx, MAX_VERTEX_NUM, max_edge, acc_verticesOnCell_buf);
             // =============================== Find max_edges vertices.
             double current_cell_vertices_value[MAX_VERTEX_NUM];
-            bool bBoundary = false;
+            
             for (auto k = 0; k < MAX_VERTEX_NUM; ++k)
             {
+                bool bBoundary = false;
                 auto vertex_idx = current_cell_vertices_idx[k];
                 // 2.1 If it is nan, skip
                 if (vertex_idx == nan) { current_cell_vertices_value[k] = std::numeric_limits<double>::quiet_NaN(); continue; }
@@ -702,9 +704,10 @@ void MPASOSolution::calcCellCenterToVertex(const std::string& name, const std::v
             SYCLKernel::GetCellVerticesIdx(cell_id, current_cell_vertices_number, current_cell_vertices_idx, MAX_VERTEX_NUM, max_edge, acc_verticesOnCell_buf);
             // =============================== Find max_edges vertices
             double current_cell_vertices_value[MAX_VERTEX_NUM];
-            bool bBoundary = false;
+            
             for (auto k = 0; k < MAX_VERTEX_NUM; ++k)
             {
+                bool bBoundary = false;
                 auto vertex_idx = current_cell_vertices_idx[k];
                 // 2.1 If it is nan, skip
                 if (vertex_idx == nan) { current_cell_vertices_value[k] = std::numeric_limits<double>::quiet_NaN(); continue; }
@@ -1233,7 +1236,6 @@ void MPASOSolution::calcCellVertexVelocity(MPASOGrid* grid, std::string& dataDir
             const int TOTAY_ZTOP_LAYER = acc_grid_info_buf[4];
             const int VERTLEVELS = acc_grid_info_buf[4];
             // 1. Find all vertices of this cell, set to nan if not exist
-
             // 1.1 Calculate how many vertices this CELL has
             auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
             auto nan = std::numeric_limits<size_t>::max();
@@ -1242,9 +1244,10 @@ void MPASOSolution::calcCellVertexVelocity(MPASOGrid* grid, std::string& dataDir
             SYCLKernel::GetCellVerticesIdx(cell_id, current_cell_vertices_number, current_cell_vertices_idx, MAX_VERTEX_NUM, max_edge, acc_verticesOnCell_buf);
             // =============================== Find max_edge vertices ===============================
             vec3 current_cell_vertices_value[MAX_VERTEX_NUM];
-            bool bBoundary = false;
+            
             for (auto k = 0; k < MAX_VERTEX_NUM; ++k)
             {
+                bool bBoundary = false;
                 auto vertex_idx = current_cell_vertices_idx[k];
                 // 2.1 If it is nan, skip
                 if (vertex_idx == nan)
@@ -1310,6 +1313,149 @@ void MPASOSolution::calcCellVertexVelocity(MPASOGrid* grid, std::string& dataDir
 
 }
 
+void MPASOSolution::calcCellVertexVertVelocity(MPASOGrid* grid, std::string& dataDir, sycl::queue& q)
+{
+    if (mTotalZTopLayer != 0)
+        mTotalZTopLayerP1 = mTotalZTopLayer + 1;
+
+    if(!cellVertexVertVelocity_vec.empty()) cellVertexVertVelocity_vec.clear();
+    cellVertexVertVelocity_vec.resize(mVertexSize * (mTotalZTopLayerP1));
+
+    auto cell_vertex_vert_velocity_path = dataDir + "/" + "cellVertexVertVelocity_vec_" + std::to_string(mTimesteps) + ".bin";
+
+    if (std::filesystem::exists(cell_vertex_vert_velocity_path)) {
+        readVertexZTopFromFile<double>(cellVertexVertVelocity_vec, cell_vertex_vert_velocity_path);
+        return;
+    }
+
+    std::vector<size_t> grid_info_vec;
+    // tbl
+    // 0 : mCellsSize
+    // 1 : mEdgesSize
+    // 2 : mMaxEdgesSize
+    // 3 : mVertexSize
+    // 4 : mVertLevels
+    // 5 : mVertLevelsP1
+    grid_info_vec.push_back(grid->mCellsSize);
+    grid_info_vec.push_back(grid->mEdgesSize);
+    grid_info_vec.push_back(grid->mMaxEdgesSize);
+    grid_info_vec.push_back(grid->mVertexSize);
+    grid_info_vec.push_back(grid->mVertLevels);
+    grid_info_vec.push_back(grid->mVertLevelsP1);
+
+
+#if USE_SYCL
+    sycl::buffer<vec3, 1> vertexCoord_buf(grid->vertexCoord_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size())); // CELL vertex coordinate
+    sycl::buffer<vec3, 1> cellCoord_buf(grid->cellCoord_vec.data(), sycl::range<1>(grid->cellCoord_vec.size()));       // CELL center coordinate
+
+    sycl::buffer<size_t, 1> numberVertexOnCell_buf(grid->numberVertexOnCell_vec.data(), sycl::range<1>(grid->numberVertexOnCell_vec.size())); // Number of vertices on CELL
+    sycl::buffer<size_t, 1> verticesOnCell_buf(grid->verticesOnCell_vec.data(), sycl::range<1>(grid->verticesOnCell_vec.size()));             // 
+    sycl::buffer<size_t, 1> cellsOnVertex_buf(grid->cellsOnVertex_vec.data(), sycl::range<1>(grid->cellsOnVertex_vec.size()));
+
+    sycl::buffer<double, 1> cellCenterVertVelocity_buf(cellVertVelocity_vec.data(), sycl::range<1>(cellVertVelocity_vec.size()));                                       //CELL center Vertical velocity
+    sycl::buffer<double, 1> cellVertexVertVelocity_buf(cellVertexVertVelocity_vec.data(), sycl::range<1>(grid->vertexCoord_vec.size() * (mTotalZTopLayerP1)));        //CELL vertex Vertical velocity
+
+    sycl::buffer<size_t, 1> grid_info_buf(grid_info_vec.data(), sycl::range<1>(grid_info_vec.size())); 
+
+    q.submit([&](sycl::handler& cgh) {
+
+        auto acc_vertexCoord_buf = vertexCoord_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellCoord_buf = cellCoord_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_numberVertexOnCell_buf = numberVertexOnCell_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_verticesOnCell_buf = verticesOnCell_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellsOnVertex_buf = cellsOnVertex_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellCenterVertVelocity_buf = cellCenterVertVelocity_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellVertexVertVelocity_buf = cellVertexVertVelocity_buf.get_access<sycl::access::mode::read_write>(cgh);
+        auto acc_grid_info_buf          = grid_info_buf.get_access<sycl::access::mode::read>(cgh);
+
+        cgh.parallel_for(sycl::range<2>(mCellsSize, mTotalZTopLayerP1), [=](sycl::id<2> idx) {
+            size_t j = idx[0];
+            size_t i = idx[1];
+
+            auto cell_id = j;
+            auto current_layer = i;
+
+            const int CELL_SIZE = acc_grid_info_buf[0];
+            const int max_edge = acc_grid_info_buf[2];
+            const int MAX_VERTEX_NUM = 20;
+            const int NEIGHBOR_NUM = 3;
+            const int TOTAY_ZTOP_LAYER = acc_grid_info_buf[5]; // for vert velocity, we use mTotalZTopLayerP1, which is stored in grid_info_buf[5]
+            const int VERTLEVELS = acc_grid_info_buf[5];
+            // 1. Find all vertices of this cell, set to nan if not exist
+            // 1.1 Calculate how many vertices this CELL has
+            auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
+            auto nan = std::numeric_limits<size_t>::max();
+            // 1.2 Find all candidate vertices
+            size_t current_cell_vertices_idx[MAX_VERTEX_NUM];
+            SYCLKernel::GetCellVerticesIdx(cell_id, current_cell_vertices_number, current_cell_vertices_idx, MAX_VERTEX_NUM, max_edge, acc_verticesOnCell_buf);
+            // =============================== Find max_edge vertices ===============================
+            double current_cell_vertices_value[MAX_VERTEX_NUM];          
+            for (auto k = 0; k < MAX_VERTEX_NUM; ++k)
+            {
+                bool bBoundary = false;
+                auto vertex_idx = current_cell_vertices_idx[k];
+                // 2.1 If it is nan, skip
+                if (vertex_idx == nan)
+                {
+                    auto double_nan = std::numeric_limits<double>::quiet_NaN();
+                    current_cell_vertices_value[k] = { double_nan };
+                    continue; 
+                }
+                auto current_vertex = acc_vertexCoord_buf[vertex_idx];
+                // 2.2 If it is not nan, find the 3 cell ids (candidates) containing this vertex; boundary cases may have fewer than 3
+                size_t tmp_cell_id[3];
+                tmp_cell_id[0] = acc_cellsOnVertex_buf[3 * vertex_idx + 0] - 1;
+                tmp_cell_id[1] = acc_cellsOnVertex_buf[3 * vertex_idx + 1] - 1;
+                tmp_cell_id[2] = acc_cellsOnVertex_buf[3 * vertex_idx + 2] - 1;
+                // 2.3 Find the center velocities of these 3 cells
+                double tmp_cell_center_vels[3];
+                for (auto tmp_cell = 0; tmp_cell < NEIGHBOR_NUM; tmp_cell++)
+                {
+                    double value;
+                    if (tmp_cell_id[tmp_cell] > CELL_SIZE + 1)
+                    {
+                        value = { 0.0};
+                        tmp_cell_center_vels[tmp_cell] = value;
+                        bBoundary = true;
+                    }
+                    else
+                    {
+                        double vel;
+                        auto vel_idx = VERTLEVELS * tmp_cell_id[tmp_cell] + current_layer;
+                        vel = acc_cellCenterVertVelocity_buf[vel_idx];
+                        tmp_cell_center_vels[tmp_cell] = vel;
+                    }
+                }
+               
+                // 2.4 If it's a boundary point
+                if (bBoundary)
+                {
+                    current_cell_vertices_value[k] = 0.0 * tmp_cell_center_vels[0] + 0.0 * tmp_cell_center_vels[1] + 0.0 * tmp_cell_center_vels[2];
+                }
+                else
+                {
+                    double u, v, w;
+                    vec3 p1 = acc_cellCoord_buf[tmp_cell_id[0]];
+                    vec3 p2 = acc_cellCoord_buf[tmp_cell_id[1]];
+                    vec3 p3 = acc_cellCoord_buf[tmp_cell_id[2]];
+                    Interpolator::TRIANGLE tri(p1, p2, p3);
+                    Interpolator::calcTriangleBarycentric(current_vertex, &tri, u, v, w);
+                    current_cell_vertices_value[k] = u * tmp_cell_center_vels[0] + v * tmp_cell_center_vels[1] + w * tmp_cell_center_vels[2];
+                }
+
+                acc_cellVertexVertVelocity_buf[vertex_idx * TOTAY_ZTOP_LAYER + current_layer] = current_cell_vertices_value[k];
+            }
+            });
+        });
+    q.wait_and_throw();
+    auto host_accessor = cellVertexVertVelocity_buf.get_host_access(sycl::read_only);
+    auto range = host_accessor.get_range();
+    size_t acc_length = range.size(); 
+    writeVertexZTopToFile<double>(cellVertexVertVelocity_vec, cell_vertex_vert_velocity_path);
+    Debug("[MPASOSolution]::Calc Cell cellVertexVertVelocity_vec  = \t [ %d ] \t type = [ float64 ]", 
+            cellVertexVertVelocity_vec.size());
+#endif
+}
 
 void MPASOSolution::readFromBlock_Vec3(const std::string& filename, std::vector<vec3>& vec)
 {
