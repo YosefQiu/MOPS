@@ -1078,6 +1078,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
 #pragma region sycl_buffer_velocity
     sycl::buffer<vec3, 1>   cellVertexVelocity_buf(mpasoF->mSol_Front->cellVertexVelocity_vec.data(),   sycl::range<1>(mpasoF->mSol_Front->cellVertexVelocity_vec.size()));
     sycl::buffer<double, 1> cellVertexZTop_buf(mpasoF->mSol_Front->cellVertexZTop_vec.data(),           sycl::range<1>(mpasoF->mSol_Front->cellVertexZTop_vec.size()));
+    sycl::buffer<double, 1> cellVertexVertVelocity_buf(mpasoF->mSol_Front->cellVertexVertVelocity_vec.data(), sycl::range<1>(mpasoF->mSol_Front->cellVertexVertVelocity_vec.size()));
 #pragma endregion sycl_buffer_velocity   
 
 #pragma region sycl_buffer_particle_depths
@@ -1107,6 +1108,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
 #pragma region sycl_acc_velocity
         auto acc_cellVertexVelocity_buf = cellVertexVelocity_buf.get_access<sycl::access::mode::read>(cgh);
         auto acc_cellVertexZTop_buf     = cellVertexZTop_buf.get_access<sycl::access::mode::read>(cgh);
+    auto acc_cellVertexVertVelocity_buf = cellVertexVertVelocity_buf.get_access<sycl::access::mode::read>(cgh);
 #pragma endregion sycl_acc_velocity
 
         auto acc_def_cell_id_buf    = cellID_buf.get_access<sycl::access::mode::read>(cgh);
@@ -1115,7 +1117,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
         auto acc_sample_points_buf  = sample_points_buf.get_access<sycl::access::mode::read_write>(cgh);
 
         // Access per-particle depth buffer
-        auto acc_particle_depths_buf = particle_depths_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_particle_depths_buf = particle_depths_buf.get_access<sycl::access::mode::read_write>(cgh);
 
         sycl::stream out(4096, 256, cgh);
         int times               = config->simulationDuration / config->deltaT;
@@ -1137,6 +1139,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
             const int ACTUALL_MAX_EDGE_SIZE     = (int)acc_grid_info_buf[2];
             const int ACTUALL_VERTEX_SIZE       = (int)acc_grid_info_buf[3];
             const int ACTUALL_ZTOP_LAYER        = (int)acc_grid_info_buf[4];
+            const int ACTUALL_ZTOP_LAYER_P1     = (int)acc_grid_info_buf[5];
             // default parameters
             const int MAX_VERTEX_NUM                    = 20;
             const int MAX_CELL_NEIGHBOR_NUM             = 21;
@@ -1145,7 +1148,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
 
 
             // Use per-particle depth (negative because MPASO uses z-up coordinate)
-            double fixed_depth      = -1.0 * (double)acc_particle_depths_buf[global_id];
+            double current_depth    = -1.0 * (double)acc_particle_depths_buf[global_id];
             double runTime          = 0.0;
             bool bFirstLoop         = true;
             bool bFirstVel          = true;
@@ -1183,7 +1186,12 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
 
           
 
-            auto CalcVelocityAt = [&](const vec3& pos, int& cid) -> vec3 {
+            struct V1_Out {
+                vec3 h_vel;
+                double v_vel;
+            };
+
+            auto CalcVelocityAt = [&](const vec3& pos, int& cid) -> V1_Out {
                 const int cell_id = cid; 
 
                 
@@ -1198,7 +1206,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                 // False:   Not in mesh -> in land
                 if (!is_inMesh)
                 {
-                    RET0(R_NOT_IN_MESH);
+                    return { RET0(R_NOT_IN_MESH), 0.0 };
                 }
 
                 
@@ -1208,7 +1216,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                 vec3 current_cell_vertex_pos[MAX_VERTEX_NUM];
                 
                 bool rc = SYCLKernel::GetCellVertexPos(current_cell_vertex_pos, current_cell_vertices_idx, MAX_VERTEX_NUM, current_cell_vertices_number, acc_vertexCoord_buf);
-                if (!rc) RET0(R_VLA_FAIL);
+                if (!rc) return { RET0(R_VLA_FAIL), 0.0 };
                 // washpress
                 Interpolator::CalcPolygonWachspress(current_position, current_cell_vertex_pos, current_cell_vertex_weight, current_cell_vertices_number);
 
@@ -1219,7 +1227,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                     for (int v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx) 
                     {
                         int VID = current_cell_vertices_idx[v_idx];
-                        if (VID < 0 || VID >= ACTUALL_VERTEX_SIZE) return RET0(R_VLA_FAIL);
+                        if (VID < 0 || VID >= ACTUALL_VERTEX_SIZE) return { RET0(R_VLA_FAIL), 0.0 };
                         double ztop = acc_cellVertexZTop_buf[VID * ACTUALL_ZTOP_LAYER + k];
                         current_cell_vertex_ztop[v_idx] = ztop;
                     }
@@ -1246,12 +1254,12 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                 if (bOptimize == false)
                 {
                     bool bSkip_Loop_Find = false;
-                    if (fixed_depth > current_point_ztop_vec[0] + eps) 
+                    if (current_depth > current_point_ztop_vec[0] + eps) 
                     {
                         local_layer = 0;
                         bSkip_Loop_Find = true;
                     }
-                    else if (fixed_depth < current_point_ztop_vec[ACTUALL_ZTOP_LAYER - 1] - eps) 
+                    else if (current_depth < current_point_ztop_vec[ACTUALL_ZTOP_LAYER - 1] - eps) 
                     {
                         local_layer = ACTUALL_ZTOP_LAYER - 1;
                         bSkip_Loop_Find = true;
@@ -1262,7 +1270,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                         {
                             double topI = current_point_ztop_vec[k-1];
                             double botI = current_point_ztop_vec[k];
-                            if (fixed_depth <= topI + eps && fixed_depth >= botI - eps) 
+                            if (current_depth <= topI + eps && current_depth >= botI - eps) 
                             {
                                 local_layer = k; 
                                 break;
@@ -1272,11 +1280,11 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                 }
                 else
                 {
-                    if (fixed_depth > current_point_ztop_vec[0] + eps) 
+                    if (current_depth > current_point_ztop_vec[0] + eps) 
                     {
                         local_layer = 1;
                     } 
-                    else if (fixed_depth < current_point_ztop_vec[ACTUALL_ZTOP_LAYER - 1] - eps) 
+                    else if (current_depth < current_point_ztop_vec[ACTUALL_ZTOP_LAYER - 1] - eps) 
                     {
                         local_layer = ACTUALL_ZTOP_LAYER - 1;
                     } 
@@ -1292,12 +1300,12 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                             double topI = current_point_ztop_vec[mid - 1];
                             double botI = current_point_ztop_vec[mid];
 
-                            if (fixed_depth <= topI + eps && fixed_depth >= botI - eps) {
+                            if (current_depth <= topI + eps && current_depth >= botI - eps) {
                                 ans = mid;
                                 break;
                             }
                            
-                            if (fixed_depth > topI + eps) 
+                            if (current_depth > topI + eps) 
                             {
                                 hi = mid - 1;
                             } 
@@ -1320,7 +1328,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                     // << "fixed_depth=" << fixed_depth 
                     // << " ztop_surface=" << current_point_ztop_vec[0] 
                     // << " ztop_bottom=" << current_point_ztop_vec[ztop_levels-1] << sycl::endl;
-                    return RET0(R_NO_LAYER);
+                    return { RET0(R_NO_LAYER), 0.0 };
                 }
                 else
                 {
@@ -1329,10 +1337,10 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                     ztop_dn = current_point_ztop_vec[local_layer];
                     ztop_up = current_point_ztop_vec[local_layer - 1];
 
-                    double x = fixed_depth;
+                    double x = current_depth;
                     x = sycl::max(ztop_dn, sycl::min(x, ztop_up));
                     double denom = ztop_up - ztop_dn;
-                    if (sycl::fabs(denom) < 1e-12) return RET0(R_ZERO_DENOM);
+                    if (sycl::fabs(denom) < 1e-12) return { RET0(R_ZERO_DENOM), 0.0 };
                     double t = (x - ztop_dn) / denom;
                     // double current_point_ztop;
                     // current_point_ztop = t * ztop_layer1 + (1 - t) * ztop_layer2;
@@ -1347,8 +1355,8 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                     double vel_dn_mag = YOSEF_LENGTH(current_point_vel_dn);
                     double vel_up_mag = YOSEF_LENGTH(current_point_vel_up);
 
-                    if (vel_dn_mag < 1e-12 ) return RET0(R_VEL1_ZERO);
-                    if (vel_up_mag < 1e-12 ) return RET0(R_VEL2_ZERO);
+                    if (vel_dn_mag < 1e-12 ) return { RET0(R_VEL1_ZERO), 0.0 };
+                    if (vel_up_mag < 1e-12 ) return { RET0(R_VEL2_ZERO), 0.0 };
 
                     final_vel.x() = t * current_point_vel_up.x() + (1 - t) * current_point_vel_dn.x();
                     final_vel.y() = t * current_point_vel_up.y() + (1 - t) * current_point_vel_dn.y();
@@ -1357,8 +1365,25 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                     vec3 current_velocity = final_vel;
 
                     double vel_mag = YOSEF_LENGTH(current_velocity);
-                    if (vel_mag < 1e-12)    return RET0(R_FINAL_ZERO);
-                    return current_velocity;
+                    if (vel_mag < 1e-12)    return { RET0(R_FINAL_ZERO), 0.0 };
+
+                    int dn_if = local_layer;
+                    int up_if = (local_layer > 0) ? (local_layer - 1) : 0;
+
+                    double w_dn = SYCLKernel::CalcAttribute(
+                        current_cell_vertices_idx, current_cell_vertex_weight,
+                        MAX_VERTEX_NUM, current_cell_vertices_number,
+                        ACTUALL_ZTOP_LAYER_P1, dn_if,
+                        acc_cellVertexVertVelocity_buf);
+
+                    double w_up = SYCLKernel::CalcAttribute(
+                        current_cell_vertices_idx, current_cell_vertex_weight,
+                        MAX_VERTEX_NUM, current_cell_vertices_number,
+                        ACTUALL_ZTOP_LAYER_P1, up_if,
+                        acc_cellVertexVertVelocity_buf);
+
+                    double current_vertical_velocity = t * w_up + (1.0 - t) * w_dn;
+                    return { current_velocity, current_vertical_velocity };
                 }
                 
             };
@@ -1376,6 +1401,8 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
             {
                 runTime += sycl::abs(deltaT);
                 sample_point_position = acc_sample_points_buf[global_id];
+                current_depth = -1.0 * (double)acc_particle_depths_buf[global_id];
+                
                 
                 int firtst_cell_id = acc_def_cell_id_buf[global_id];
                 
@@ -1411,18 +1438,32 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                 }
 
                 vec3 current_position = sample_point_position;
-                vec3 current_velocity;
+                vec3 current_horizontal_velocity;
+                double current_vertical_velocity;
                 double r = YOSEF_LENGTH(current_position);
+                vec3 rk4_next_position = current_position;
+
+                auto AdvectOnSphere = [&](const vec3& pos, const vec3& vel, double dt_local) -> vec3 {
+                    const double rr = YOSEF_LENGTH(pos);
+                    const double speed_local = YOSEF_LENGTH(vel);
+                    if (rr < 1e-12 || speed_local < 1e-12) return pos;
+                    vec3 axis = SYCLKernel::CalcRotationAxis(pos, vel);
+                    double theta = (speed_local * dt_local) / rr;
+                    return SYCLKernel::CalcPositionAfterRotation(pos, axis, theta);
+                };
+
                 // Euler method
                 if (bEulerMethod)
                 {
-                    current_velocity = CalcVelocityAt(current_position, cell_id);
+                    auto state = CalcVelocityAt(current_position, cell_id);
+                    current_horizontal_velocity = state.h_vel;
+                    current_vertical_velocity = state.v_vel;
                     // debug
                     if (bFirstVel)
                     {
                         out << "[First Vel] gid="<<global_id
                             <<" cell_id="<<cell_id
-                            <<" vel=("<<current_velocity.x()<<","<<current_velocity.y()<<","<<current_velocity.z()<<")"
+                            <<" vel=("<<current_horizontal_velocity.x()<<","<<current_horizontal_velocity.y()<<","<<current_horizontal_velocity.z()<<")"
                             << sycl::endl;
                     }
                 }
@@ -1430,32 +1471,65 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                 {
                     // Runge-Kutta 4th order method
                     double dt = static_cast<double>(deltaT);
-                    vec3 k1 = CalcVelocityAt(current_position, cell_id);
+                    auto s1 = CalcVelocityAt(current_position, cell_id);
+                    vec3 k1 = s1.h_vel;
+                    double v1 = s1.v_vel;
                     // p + 0.5 * k1 Δt   
-                    vec3 p2   = sycl::normalize(current_position + (dt * 0.5) * k1) * r;
+                    vec3 p2   = AdvectOnSphere(current_position, k1, dt * 0.5);
                     int  cid2 = cell_id;
-                    vec3 k2   = CalcVelocityAt(p2, cid2);
+                    auto s2 = CalcVelocityAt(p2, cid2);
+                    vec3 k2 = s2.h_vel;
+                    double v2 = s2.v_vel;
                     // p + 0.5 * k2 Δt
-                    vec3 p3   = sycl::normalize(current_position + (dt * 0.5) * k2) * r;
+                    vec3 p3   = AdvectOnSphere(current_position, k2, dt * 0.5);
                     int  cid3 = cell_id;
-                    vec3 k3   = CalcVelocityAt(p3, cid3);
+                    auto s3 = CalcVelocityAt(p3, cid3);
+                    vec3 k3 = s3.h_vel;
+                    double v3 = s3.v_vel;
                     // p + 1.0 * k3 Δt
-                    vec3 p4   = sycl::normalize(current_position + dt * k3) * r;
+                    vec3 p4   = AdvectOnSphere(current_position, k3, dt);
                     int  cid4 = cell_id;
-                    vec3 k4   = CalcVelocityAt(p4, cid4);
-                    current_velocity = (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0;
+                    auto s4 = CalcVelocityAt(p4, cid4);
+                    vec3 k4 = s4.h_vel;
+                    double v4 = s4.v_vel;
+                    current_horizontal_velocity = (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0;
+                    current_vertical_velocity = (v1 + 2.0 * v2 + 2.0 * v3 + v4) / 6.0;
+
+                    // Strict RK4 endpoint on position: x_{n+1} = x_n + dt * (k1 + 2k2 + 2k3 + k4) / 6,
+                    // then project back to the current sphere radius before vertical-radius update.
+                    vec3 x_trial = current_position + current_horizontal_velocity * dt;
+                    double x_trial_len = YOSEF_LENGTH(x_trial);
+                    if (x_trial_len > 1e-12) {
+                        rk4_next_position = (x_trial / x_trial_len) * r;
+                    } else {
+                        rk4_next_position = current_position;
+                    }
                 }
                 
-                vec3 rotationAxis = SYCLKernel::CalcRotationAxis(current_position, current_velocity);
-                double speed = YOSEF_LENGTH(current_velocity);
-                double theta_rad = (speed * deltaT) / r;
-                new_position = SYCLKernel::CalcPositionAfterRotation(current_position, rotationAxis, theta_rad);
+                if (bEulerMethod)
+                {
+                    vec3 rotationAxis = SYCLKernel::CalcRotationAxis(current_position, current_horizontal_velocity);
+                    double speed = YOSEF_LENGTH(current_horizontal_velocity);
+                    double theta_rad = (speed * deltaT) / r;
+                    new_position = SYCLKernel::CalcPositionAfterRotation(current_position, rotationAxis, theta_rad);
+                }
+                else
+                {
+                    new_position = rk4_next_position;
+                }
+
+                const double old_depth = (double)acc_particle_depths_buf[global_id];
+                double new_depth = old_depth - current_vertical_velocity * (double)deltaT;
+                new_depth = sycl::fmax(0.0, new_depth);
+                double r_new = sycl::fmax(1.0, r + current_vertical_velocity * (double)deltaT);
+                acc_particle_depths_buf[global_id] = (float)new_depth;
+                new_position = sycl::normalize(new_position) * r_new;
                
                 if (bFirstVel)
                 {
                     bFirstVel = false;
                     int acc_wirte_pints_idx = base_idx + 0;
-                    acc_write_vels_buf[acc_wirte_pints_idx] = current_velocity;
+                    acc_write_vels_buf[acc_wirte_pints_idx] = current_horizontal_velocity;
                 }
 
                 acc_sample_points_buf[global_id] = new_position;
@@ -1464,7 +1538,7 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
                 {
                     int acc_wirte_pints_idx = base_idx + update_points_idx;
                     acc_wirte_points_buf[acc_wirte_pints_idx] = new_position;
-                    acc_write_vels_buf[acc_wirte_pints_idx] = current_velocity;
+                    acc_write_vels_buf[acc_wirte_pints_idx] = current_horizontal_velocity;
                     update_points_idx = update_points_idx + 1;
                 }
             }
@@ -1513,35 +1587,52 @@ std::vector<TrajectoryLine> MPASOVisualizer::StreamLine(MPASOField* mpasoF, std:
     // return trajectory_lines;
 }
 
-std::vector<TrajectoryLine> MPASOVisualizer::PathLine(
-    MPASOField* mpasoF,
-    std::vector<CartesianCoord>& points,
-    TrajectorySettings* config,
-    std::vector<int>& default_cell_id,
-    sycl::queue& sycl_Q)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+std::vector<TrajectoryLine> MPASOVisualizer::PathLine(MPASOField* mpasoF, std::vector<CartesianCoord>& points, TrajectorySettings* config, std::vector<int>& default_cell_id, sycl::queue& sycl_Q)
 {
-    std::vector<vec3> stable_points = points;
+    
+    std::vector<vec3> stable_points = points; 
 
     std::vector<vec3> update_points;
     std::vector<vec3> update_vels;
     std::vector<vec3> update_attrs;
     if (!update_points.empty()) update_points.clear();
-    if (!update_vels.empty()) update_vels.clear();
-    if (!update_attrs.empty()) update_attrs.clear();
-
     update_points.resize(stable_points.size() * (config->simulationDuration / config->recordT));
+    if (!update_vels.empty()) update_vels.clear();
     update_vels.resize(stable_points.size() * (config->simulationDuration / config->recordT));
+    if (!update_attrs.empty()) update_attrs.clear();
     update_attrs.resize(stable_points.size() * (config->simulationDuration / config->recordT));
 
     std::vector<TrajectoryLine> trajectory_lines;
     trajectory_lines.resize(stable_points.size());
-
-    // Per-particle initial depth in meters (positive downward)
+    
+    // Prepare per-particle depths: use particle_depths if provided, otherwise use default depth
     std::vector<float> effective_depths(stable_points.size());
-    bool bPerParticleDepth =
-        config->hasPerParticleDepths() &&
-        config->particle_depths.size() == stable_points.size();
-
+    bool bPerParticleDepth = config->hasPerParticleDepths() && config->particle_depths.size() == stable_points.size();
     if (bPerParticleDepth) {
         effective_depths = config->particle_depths;
         Debug("[PathLine] Using per-particle depths (%zu particles)", stable_points.size());
@@ -1549,20 +1640,19 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(
         std::fill(effective_depths.begin(), effective_depths.end(), config->depth);
         Debug("[PathLine] Using uniform depth: %.2f meters", config->depth);
     }
-
-    // NEW: mutable per-particle depths during integration (meters, positive downward)
-    std::vector<float> sample_depths = effective_depths;
-
+    
     tbb::parallel_for(size_t(0), stable_points.size(), [&](size_t i) {
         trajectory_lines[i].lineID = i;
         trajectory_lines[i].points.push_back(stable_points[i]);
         trajectory_lines[i].lastPoint = stable_points[i];
         trajectory_lines[i].duration = config->simulationDuration;
         trajectory_lines[i].timestamp = config->deltaT;
-        trajectory_lines[i].depth = effective_depths[i];
+        trajectory_lines[i].depth = effective_depths[i];  // Use per-particle depth
     });
 
+   
     std::vector<size_t> grid_info_vec;
+    // tbl
     // 0 : mCellsSize
     // 1 : mEdgesSize
     // 2 : mMaxEdgesSize
@@ -1577,52 +1667,36 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(
     grid_info_vec.push_back(mpasoF->mGrid->mVertLevelsP1);
 
 #pragma region sycl_buffer_grid
-    sycl::buffer<vec3, 1>   vertexCoord_buf(mpasoF->mGrid->vertexCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->vertexCoord_vec.size()));
-    sycl::buffer<vec3, 1>   cellCoord_buf(mpasoF->mGrid->cellCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->cellCoord_vec.size()));
-    sycl::buffer<size_t, 1> numberVertexOnCell_buf(mpasoF->mGrid->numberVertexOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->numberVertexOnCell_vec.size()));
-    sycl::buffer<size_t, 1> verticesOnCell_buf(mpasoF->mGrid->verticesOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->verticesOnCell_vec.size()));
+    sycl::buffer<vec3, 1>   vertexCoord_buf(mpasoF->mGrid->vertexCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->vertexCoord_vec.size())); 
+    sycl::buffer<vec3, 1>   cellCoord_buf(mpasoF->mGrid->cellCoord_vec.data(), sycl::range<1>(mpasoF->mGrid->cellCoord_vec.size()));       
+    sycl::buffer<size_t, 1> numberVertexOnCell_buf(mpasoF->mGrid->numberVertexOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->numberVertexOnCell_vec.size())); 
+    sycl::buffer<size_t, 1> verticesOnCell_buf(mpasoF->mGrid->verticesOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->verticesOnCell_vec.size()));             
     sycl::buffer<size_t, 1> cellsOnVertex_buf(mpasoF->mGrid->cellsOnVertex_vec.data(), sycl::range<1>(mpasoF->mGrid->cellsOnVertex_vec.size()));
     sycl::buffer<size_t, 1> cells_onCell_buf(mpasoF->mGrid->cellsOnCell_vec.data(), sycl::range<1>(mpasoF->mGrid->cellsOnCell_vec.size()));
     sycl::buffer<size_t, 1> grid_info_buf(grid_info_vec.data(), sycl::range<1>(grid_info_vec.size()));
-#pragma endregion
+#pragma endregion   
+
 
 #pragma region sycl_buffer_velocity
-    // Horizontal velocity (vertex, level)
-    sycl::buffer<vec3, 1>   cellVertexVelocity_front_buf(
-        mpasoF->mSol_Front->cellVertexVelocity_vec.data(),
-        sycl::range<1>(mpasoF->mSol_Front->cellVertexVelocity_vec.size()));
-    sycl::buffer<vec3, 1>   cellVertexVelocity_back_buf(
-        mpasoF->mSol_Back->cellVertexVelocity_vec.data(),
-        sycl::range<1>(mpasoF->mSol_Back->cellVertexVelocity_vec.size()));
+    sycl::buffer<vec3, 1>   cellVertexVelocity_front_buf(mpasoF->mSol_Front->cellVertexVelocity_vec.data(), sycl::range<1>(mpasoF->mSol_Front->cellVertexVelocity_vec.size()));
+    sycl::buffer<double, 1> cellVertexZTop_front_buf(mpasoF->mSol_Front->cellVertexZTop_vec.data(), sycl::range<1>(mpasoF->mSol_Front->cellVertexZTop_vec.size()));
+    sycl::buffer<double, 1> cellVertexVertVelocity_front_buf(mpasoF->mSol_Front->cellVertexVertVelocity_vec.data(), sycl::range<1>(mpasoF->mSol_Front->cellVertexVertVelocity_vec.size()));
+    sycl::buffer<vec3, 1>   cellVertexVelocity_back_buf(mpasoF->mSol_Back->cellVertexVelocity_vec.data(), sycl::range<1>(mpasoF->mSol_Back->cellVertexVelocity_vec.size()));
+    sycl::buffer<double, 1> cellVertexZTop_back_buf(mpasoF->mSol_Back->cellVertexZTop_vec.data(), sycl::range<1>(mpasoF->mSol_Back->cellVertexZTop_vec.size()));
+    sycl::buffer<double, 1> cellVertexVertVelocity_back_buf(mpasoF->mSol_Back->cellVertexVertVelocity_vec.data(), sycl::range<1>(mpasoF->mSol_Back->cellVertexVertVelocity_vec.size()));
+#pragma endregion   
 
-    // ZTop (vertex, level)
-    sycl::buffer<double, 1> cellVertexZTop_front_buf(
-        mpasoF->mSol_Front->cellVertexZTop_vec.data(),
-        sycl::range<1>(mpasoF->mSol_Front->cellVertexZTop_vec.size()));
-    sycl::buffer<double, 1> cellVertexZTop_back_buf(
-        mpasoF->mSol_Back->cellVertexZTop_vec.data(),
-        sycl::range<1>(mpasoF->mSol_Back->cellVertexZTop_vec.size()));
-
-    // Vertical velocity (vertex, interface = VertLevelsP1)
-    sycl::buffer<double, 1> cellVertexVertVelocity_front_buf(
-        mpasoF->mSol_Front->cellVertexVertVelocity_vec.data(),
-        sycl::range<1>(mpasoF->mSol_Front->cellVertexVertVelocity_vec.size()));
-    sycl::buffer<double, 1> cellVertexVertVelocity_back_buf(
-        mpasoF->mSol_Back->cellVertexVertVelocity_vec.data(),
-        sycl::range<1>(mpasoF->mSol_Back->cellVertexVertVelocity_vec.size()));
-#pragma endregion
 
 #pragma region sycl_buffer_double_attributes
     bool bDoubleAttributes = false;
     std::vector<std::string> attr_names_front;
     std::vector<std::string> attr_names_back;
-    std::vector<sycl::buffer<double, 1>> attr_bufs_front;
-    std::vector<sycl::buffer<double, 1>> attr_bufs_back;
-
+    std::vector<sycl::buffer<double, 1> > attr_bufs_front;
+    std::vector<sycl::buffer<double, 1> > attr_bufs_back;
     if (mpasoF->mSol_Front->mDoubleAttributes.size() > 1)
     {
         bDoubleAttributes = true;
-
+        
         for (const auto& [name, vec] : mpasoF->mSol_Front->mDoubleAttributes_CtoV)
         {
             attr_names_front.push_back(name);
@@ -1635,24 +1709,22 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(
             attr_bufs_back.emplace_back(vec.data(), sycl::range<1>(vec.size()));
         }
     }
-#pragma endregion
+#pragma endregion 
 
 #pragma region sycl_buffer_particle_depths
-    // Initial depth, read-only
     sycl::buffer<float, 1> particle_depths_buf(effective_depths.data(), sycl::range<1>(effective_depths.size()));
-    // NEW: mutable depth during integration
-    sycl::buffer<float, 1> sample_depths_buf(sample_depths.data(), sycl::range<1>(sample_depths.size()));
-#pragma endregion
+#pragma endregion 
 
     sycl::buffer<int, 1>    cellID_buf(default_cell_id.data(),      sycl::range<1>(default_cell_id.size()));
     sycl::buffer<vec3, 1>   wirte_points_buf(update_points.data(),  sycl::range<1>(update_points.size()));
     sycl::buffer<vec3, 1>   write_vels_buf(update_vels.data(),      sycl::range<1>(update_vels.size()));
     sycl::buffer<vec3, 1>   write_attrs_buf(update_attrs.data(),    sycl::range<1>(update_attrs.size()));
     sycl::buffer<vec3, 1>   sample_points_buf(stable_points.data(), sycl::range<1>(stable_points.size()));
-
-    sycl_Q.submit([&](sycl::handler& cgh)
+    sycl_Q.submit([&](sycl::handler& cgh) 
     {
-        constexpr int MAX_ATTRS = 8;
+
+        constexpr int MAX_OUTPUTS = 8;  // max img_vec size
+        constexpr int MAX_ATTRS = 8;    // max attribute size
 
 #pragma region sycl_acc_grid
         auto acc_cellID_buf             = cellID_buf.get_access<sycl::access::mode::read>(cgh);
@@ -1662,78 +1734,80 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(
         auto acc_verticesOnCell_buf     = verticesOnCell_buf.get_access<sycl::access::mode::read>(cgh);
         auto acc_cellsOnVertex_buf      = cellsOnVertex_buf.get_access<sycl::access::mode::read>(cgh);
         auto acc_cells_onCell_buf       = cells_onCell_buf.get_access<sycl::access::mode::read>(cgh);
+        int grid_cell_size              = mpasoF->mGrid->mCellsSize;
         auto acc_grid_info_buf          = grid_info_buf.get_access<sycl::access::mode::read>(cgh);
-#pragma endregion
+#pragma endregion 
 
 #pragma region sycl_acc_velocity
-        auto acc_cellVertexVelocity_front_buf = cellVertexVelocity_front_buf.get_access<sycl::access::mode::read>(cgh);
-        auto acc_cellVertexVelocity_back_buf  = cellVertexVelocity_back_buf.get_access<sycl::access::mode::read>(cgh);
-        auto acc_cellVertexZTop_front_buf     = cellVertexZTop_front_buf.get_access<sycl::access::mode::read>(cgh);
-        auto acc_cellVertexZTop_back_buf      = cellVertexZTop_back_buf.get_access<sycl::access::mode::read>(cgh);
-
-        // NEW
-        auto acc_cellVertexVertVelocity_front_buf = cellVertexVertVelocity_front_buf.get_access<sycl::access::mode::read>(cgh);
-        auto acc_cellVertexVertVelocity_back_buf  = cellVertexVertVelocity_back_buf.get_access<sycl::access::mode::read>(cgh);
-#pragma endregion
+        auto acc_cellVertexVelocity_front_buf       = cellVertexVelocity_front_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellVertexZTop_front_buf           = cellVertexZTop_front_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellVertexVelocity_back_buf        = cellVertexVelocity_back_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellVertexZTop_back_buf            = cellVertexZTop_back_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellVertexVertVelocity_front_buf   = cellVertexVertVelocity_front_buf.get_access<sycl::access::mode::read>(cgh);
+        auto acc_cellVertexVertVelocity_back_buf    = cellVertexVertVelocity_back_buf.get_access<sycl::access::mode::read>(cgh);
+#pragma endregion 
 
         int attr_count = 0;
         std::array<sycl::accessor<double, 1, sycl::access::mode::read>, MAX_ATTRS> acc_attr_bufs_front;
         std::array<sycl::accessor<double, 1, sycl::access::mode::read>, MAX_ATTRS> acc_attr_bufs_back;
-
         if (bDoubleAttributes)
         {
-            attr_count = static_cast<int>(attr_bufs_front.size());
+
+            attr_count = attr_bufs_front.size();
+
             for (int i = 0; i < attr_count; ++i) {
                 acc_attr_bufs_front[i] = attr_bufs_front[i].get_access<sycl::access::mode::read>(cgh);
-                acc_attr_bufs_back[i]  = attr_bufs_back[i].get_access<sycl::access::mode::read>(cgh);
+                acc_attr_bufs_back[i] = attr_bufs_back[i].get_access<sycl::access::mode::read>(cgh);
             }
         }
 
         auto acc_def_cell_id_buf    = cellID_buf.get_access<sycl::access::mode::read>(cgh);
         auto acc_wirte_points_buf   = wirte_points_buf.get_access<sycl::access::mode::write>(cgh);
         auto acc_write_vels_buf     = write_vels_buf.get_access<sycl::access::mode::write>(cgh);
-        auto acc_write_attrs_buf    = write_attrs_buf.get_access<sycl::access::mode::write>(cgh);
+        auto acc_write_attrs_buf   = write_attrs_buf.get_access<sycl::access::mode::write>(cgh);
         auto acc_sample_points_buf  = sample_points_buf.get_access<sycl::access::mode::read_write>(cgh);
-
-        auto acc_particle_depths_buf = particle_depths_buf.get_access<sycl::access::mode::read>(cgh);
-        auto acc_sample_depths_buf   = sample_depths_buf.get_access<sycl::access::mode::read_write>(cgh);
-
+        auto acc_particle_depths_buf = particle_depths_buf.get_access<sycl::access::mode::read_write>(cgh);
+        
         sycl::stream out(4096, 256, cgh);
+        int n_steps             = config->simulationDuration / config->deltaT;
+        int each_points_size    = config->simulationDuration / config->recordT;
+        int recordT             = config->recordT;
+        int dt_sign             = config->directionType == MOPS::CalcDirection::kForward ? 1 : -1;
+        int deltaT              = dt_sign * config->deltaT;
+        bool bEulerMethod       = config->methodType == MOPS::CalcMethodType::kEuler ? true : false;
 
-        int n_steps          = config->simulationDuration / config->deltaT;
-        int each_points_size = config->simulationDuration / config->recordT;
-        int recordT          = config->recordT;
-        int dt_sign          = config->directionType == MOPS::CalcDirection::kForward ? 1 : -1;
-        int deltaT           = dt_sign * config->deltaT;
-        bool bEulerMethod    = config->methodType == MOPS::CalcMethodType::kEuler ? true : false;
-
-        cgh.parallel_for(sycl::range<1>(points.size()), [=](sycl::item<1> item)
+        
+       
+        cgh.parallel_for(sycl::range<1>(points.size()), [=](sycl::item<1> item) 
         {
             int global_id = item[0];
-
             // load from grid info
-            const int ACTUALL_CELL_SIZE      = (int)acc_grid_info_buf[0];
-            const int ACTUALL_EDGE_SIZE      = (int)acc_grid_info_buf[1];
-            const int ACTUALL_MAX_EDGE_SIZE  = (int)acc_grid_info_buf[2];
-            const int ACTUALL_VERTEX_SIZE    = (int)acc_grid_info_buf[3];
-            const int ACTUALL_ZTOP_LAYER     = (int)acc_grid_info_buf[4]; // levels
-            const int ACTUALL_ZTOP_LAYER_P1  = (int)acc_grid_info_buf[5]; // interfaces
+            const int ACTUALL_CELL_SIZE         = (int)acc_grid_info_buf[0];
+            const int ACTUALL_EDGE_SIZE         = (int)acc_grid_info_buf[1];
+            const int ACTUALL_MAX_EDGE_SIZE     = (int)acc_grid_info_buf[2];
+            const int ACTUALL_VERTEX_SIZE       = (int)acc_grid_info_buf[3];
+            const int ACTUALL_ZTOP_LAYER        = (int)acc_grid_info_buf[4];
+            const int ACTUALL_ZTOP_LAYER_P1     = (int)acc_grid_info_buf[5];
+            // default
+            const int MAX_VERTEX_NUM                    = 10;
+            const int MAX_CELL_NEIGHBOR_NUM             = 11;
+            const int MAX_VERTICAL_LEVEL_NUM            = 80;
+            const int MAX_VERTEX_NEIGHBOR_NUM           = 3;
 
-            const int MAX_VERTEX_NUM         = 10;
-            const int MAX_CELL_NEIGHBOR_NUM  = 11;
-            const int MAX_VERTICAL_LEVEL_NUM = 80;
-            const int MAX_VERTEX_NEIGHBOR_NUM = 3;
-
-            double runTime      = 0.0;
-            bool bFirstLoop     = true;
-            bool bFirstVel      = true;
-            bool bFirstAttr     = true;
-
-            int base_idx        = global_id * each_points_size;
-            int update_points_idx = 0;
-
+            double current_depth                        = -1.0 * (double)acc_particle_depths_buf[global_id];
+            double runTime                              = 0.0;
+            bool bFirstLoop                             = true;
+            bool bFirstVel                              = true;
+            bool bFirstAttr                             = true;
+            bool bOptimize                              = true;
+            
+            int base_idx                                = global_id * each_points_size;
+            int update_points_idx                       = 0;
+            int save_times                              = 0;
+            
             vec3 sample_point_position, new_position;
             int cell_id = -1;
+            int cell_id_vec[MAX_VERTEX_NUM];
             int cell_neig_vec[MAX_CELL_NEIGHBOR_NUM];
 
             enum : int {
@@ -1748,162 +1822,124 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(
                 R_VLA_FAIL          = 8
             };
 
-            struct SampleOut {
-                vec3 hvel;   // horizontal velocity only
-                double w;    // vertical/radial velocity scalar
+            struct V2_Out {
+                vec3 h_vel;     // horizontal velocity
+                double v_vel;   // vertical velocity
                 vec3 attr;
+                
             };
 
-            auto RET0 = [&](int reason) -> SampleOut {
-                if (global_id == -1) {
-                    out << "[ZERO] gid=" << global_id << " step=" << (int)(runTime / deltaT)
-                        << " reason=" << reason << sycl::endl;
+            auto RET0 = [&](int reason) -> V2_Out {
+                if (global_id==-1 /*or other cell id*/ ) {
+                    out << "[ZERO] gid="<<global_id<<" step="<< (int)(runTime/deltaT)
+                        <<" reason="<<reason<< sycl::endl;
                 }
-                return { vec3(0.0), 0.0, vec3(0.0) };
+                return {vec3(0.0), 0.0, vec3(0.0)};
             };
-
-            auto clamp01 = [&](double a) -> double {
-                return sycl::max(0.0, sycl::min(1.0, a));
-            };
-
-            auto AdvancePositionEuler = [&](const vec3& pos, const vec3& hvel, double w, double dt) -> vec3 {
-                double r = YOSEF_LENGTH(pos);
-                if (r <= 1e-12) return pos;
-
-                vec3 horiz_pos = pos;
-                double hspeed = YOSEF_LENGTH(hvel);
-                if (hspeed > 1e-16) {
-                    vec3 rotationAxis = SYCLKernel::CalcRotationAxis(pos, hvel);
-                    double theta_rad = (hspeed * dt) / r;
-                    horiz_pos = SYCLKernel::CalcPositionAfterRotation(pos, rotationAxis, theta_rad);
-                }
-
-                // Vertical/radial update
-                double new_r = r + w * dt;
-                if (new_r < 1e-8) new_r = 1e-8;
-
-                return (new_r / r) * horiz_pos;
-            };
-
-            auto CalcVelocityAt = [&](const vec3& pos, int& cid, double alpha) -> SampleOut
+            
+            auto CalcVelocityAt = [&](const vec3& pos, int& cid, double alpha) -> V2_Out 
             {
-                const int cell_id_local = cid;
+                
+                const int cell_id = cid;
+                
+                // 1. check in mesh
                 vec3 current_position = pos;
                 double alpha_for_interplate = alpha;
 
-                // Current depth in internal z-up sign convention
-                double current_depth = -1.0 * (double)acc_sample_depths_buf[global_id];
-
-                auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id_local];
+                auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
                 size_t current_cell_vertices_idx[MAX_VERTEX_NUM];
-                SYCLKernel::GetCellVerticesIdx(
-                    cell_id_local,
-                    current_cell_vertices_number,
-                    current_cell_vertices_idx,
-                    MAX_VERTEX_NUM,
-                    ACTUALL_MAX_EDGE_SIZE,
-                    acc_verticesOnCell_buf);
-
-                bool is_land = SYCLKernel::IsInMesh(
-                    cell_id_local,
-                    ACTUALL_MAX_EDGE_SIZE,
-                    current_position,
-                    acc_numberVertexOnCell_buf,
-                    acc_verticesOnCell_buf,
-                    acc_vertexCoord_buf);
-
-                if (!is_land) {
-                    return RET0(R_NOT_IN_MESH);
+                SYCLKernel::GetCellVerticesIdx(cell_id, current_cell_vertices_number, current_cell_vertices_idx, MAX_VERTEX_NUM, ACTUALL_MAX_EDGE_SIZE, acc_verticesOnCell_buf);
+                bool is_land = SYCLKernel::IsInMesh(cell_id, ACTUALL_MAX_EDGE_SIZE, current_position, acc_numberVertexOnCell_buf, acc_verticesOnCell_buf, acc_vertexCoord_buf);
+                if (!is_land)
+                {
+                    RET0(R_NOT_IN_MESH);
                 }
 
-                // 1) Interpolate zTop to current position to find the current vertical layer
+                
+                // 2. Calc ztop at current position
                 double current_point_ztop_front_vec[MAX_VERTICAL_LEVEL_NUM];
                 double current_point_ztop_back_vec[MAX_VERTICAL_LEVEL_NUM];
                 double current_cell_vertex_weight[MAX_VERTEX_NUM];
-                vec3   current_cell_vertex_pos[MAX_VERTEX_NUM];
+                vec3 current_cell_vertex_pos[MAX_VERTEX_NUM];
+                
+                bool rc = SYCLKernel::GetCellVertexPos(current_cell_vertex_pos, current_cell_vertices_idx, MAX_VERTEX_NUM, current_cell_vertices_number, acc_vertexCoord_buf);
+                if (!rc) RET0(R_VLA_FAIL);
+                // washpress
+                Interpolator::CalcPolygonWachspress(current_position, current_cell_vertex_pos, current_cell_vertex_weight, current_cell_vertices_number);
 
-                bool rc = SYCLKernel::GetCellVertexPos(
-                    current_cell_vertex_pos,
-                    current_cell_vertices_idx,
-                    MAX_VERTEX_NUM,
-                    current_cell_vertices_number,
-                    acc_vertexCoord_buf);
-
-                if (!rc) return RET0(R_VLA_FAIL);
-
-                Interpolator::CalcPolygonWachspress(
-                    current_position,
-                    current_cell_vertex_pos,
-                    current_cell_vertex_weight,
-                    current_cell_vertices_number);
-
-                for (int k = 0; k < ACTUALL_ZTOP_LAYER; ++k)
+                for (auto k = 0; k < ACTUALL_ZTOP_LAYER; ++k)
                 {
                     double current_point_ztop_in_layer_front = 0.0;
-                    double current_point_ztop_in_layer_back  = 0.0;
+                    double current_point_ztop_in_layer_back = 0.0;
 
+                    // Get the ztop of each vertex
                     double current_cell_vertex_ztop_front[MAX_VERTEX_NUM];
                     double current_cell_vertex_ztop_back[MAX_VERTEX_NUM];
-
-                    for (int v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx)
+                    for (auto v_idx = 0; v_idx < current_cell_vertices_number; v_idx++)
                     {
                         auto VID = current_cell_vertices_idx[v_idx];
-                        if ((int)VID < 0 || (int)VID >= ACTUALL_VERTEX_SIZE) return RET0(R_VLA_FAIL);
+                        if (VID < 0 || VID >= ACTUALL_VERTEX_SIZE) return RET0(R_VLA_FAIL);
 
                         double ztop_front = acc_cellVertexZTop_front_buf[VID * ACTUALL_ZTOP_LAYER + k];
-                        double ztop_back  = acc_cellVertexZTop_back_buf [VID * ACTUALL_ZTOP_LAYER + k];
+                        double ztop_back = acc_cellVertexZTop_back_buf[VID * ACTUALL_ZTOP_LAYER + k];
                         current_cell_vertex_ztop_front[v_idx] = ztop_front;
-                        current_cell_vertex_ztop_back[v_idx]  = ztop_back;
+                        current_cell_vertex_ztop_back[v_idx] = ztop_back;
                     }
-
-                    for (int v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx)
+                    // Calculate the ZTOP of the current point
+                    for (auto v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx)
                     {
                         current_point_ztop_in_layer_front += current_cell_vertex_weight[v_idx] * current_cell_vertex_ztop_front[v_idx];
-                        current_point_ztop_in_layer_back  += current_cell_vertex_weight[v_idx] * current_cell_vertex_ztop_back[v_idx];
+                        current_point_ztop_in_layer_back += current_cell_vertex_weight[v_idx] * current_cell_vertex_ztop_back[v_idx];
                     }
-
                     current_point_ztop_front_vec[k] = current_point_ztop_in_layer_front;
-                    current_point_ztop_back_vec[k]  = current_point_ztop_in_layer_back;
+                    current_point_ztop_back_vec[k] = current_point_ztop_in_layer_back;
                 }
 
                 for (int k = 1; k < ACTUALL_ZTOP_LAYER; ++k)
                 {
-                    if (current_point_ztop_front_vec[k] > current_point_ztop_front_vec[k - 1]) {
-                        current_point_ztop_front_vec[k] = current_point_ztop_front_vec[k - 1] - 1e-9;
-                    }
-                    if (current_point_ztop_back_vec[k] > current_point_ztop_back_vec[k - 1]) {
-                        current_point_ztop_back_vec[k] = current_point_ztop_back_vec[k - 1] - 1e-9;
-                    }
-                }
+                    if (current_point_ztop_front_vec[k] > current_point_ztop_front_vec[k-1]) 
+                    {
+                        current_point_ztop_front_vec[k] = current_point_ztop_front_vec[k-1] - 1e-9;
+                    }    
+                    if (current_point_ztop_back_vec[k] > current_point_ztop_back_vec[k-1]) 
+                    {
+                        current_point_ztop_back_vec[k] = current_point_ztop_back_vec[k-1] - 1e-9;
+                    }    
+                } 
 
-                const double eps = 1e-8;
-                int local_layer_front = -1;
-                int local_layer_back  = -1;
-
-                bool bSkip_Loop_find_front = false;
-                bool bSkip_Loop_find_back  = false;
-
-                if (current_depth > current_point_ztop_front_vec[0] + eps) {
+                
+                const double eps            = 1e-8;           
+                int local_layer_front       = -1;
+                int local_layer_back        = -1;
+                bool bSkip_Loop_find_front  = false;
+                bool bSkip_Loop_find_back   = false;
+                
+                if (current_depth > current_point_ztop_front_vec[0] + eps) 
+                {
                     local_layer_front = 0;
                     bSkip_Loop_find_front = true;
-                } else if (current_depth < current_point_ztop_front_vec[ACTUALL_ZTOP_LAYER - 1] - eps) {
+                }
+                else if (current_depth < current_point_ztop_front_vec[ACTUALL_ZTOP_LAYER - 1] - eps) 
+                {
                     local_layer_front = ACTUALL_ZTOP_LAYER - 1;
                     bSkip_Loop_find_front = true;
                 }
-
-                if (current_depth > current_point_ztop_back_vec[0] + eps) {
+                if (current_depth > current_point_ztop_back_vec[0] + eps) 
+                {
                     local_layer_back = 0;
                     bSkip_Loop_find_back = true;
-                } else if (current_depth < current_point_ztop_back_vec[ACTUALL_ZTOP_LAYER - 1] - eps) {
+                }
+                else if (current_depth < current_point_ztop_back_vec[ACTUALL_ZTOP_LAYER - 1] - eps) 
+                {
                     local_layer_back = ACTUALL_ZTOP_LAYER - 1;
                     bSkip_Loop_find_back = true;
                 }
 
                 if (!bSkip_Loop_find_front)
                 {
-                    for (int k = 1; k < ACTUALL_ZTOP_LAYER; ++k)
+                    for (auto k = 1; k < ACTUALL_ZTOP_LAYER; ++k)
                     {
-                        double topI = current_point_ztop_front_vec[k - 1];
+                        double topI = current_point_ztop_front_vec[k-1];
                         double botI = current_point_ztop_front_vec[k];
                         if (current_depth <= topI + eps && current_depth >= botI - eps)
                         {
@@ -1912,12 +1948,11 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(
                         }
                     }
                 }
-
                 if (!bSkip_Loop_find_back)
                 {
                     for (int k = 1; k < ACTUALL_ZTOP_LAYER; ++k)
                     {
-                        double topI = current_point_ztop_back_vec[k - 1];
+                        double topI = current_point_ztop_back_vec[k-1];
                         double botI = current_point_ztop_back_vec[k];
                         if (current_depth <= topI + eps && current_depth >= botI - eps)
                         {
@@ -1926,240 +1961,198 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(
                         }
                     }
                 }
-
-                if (local_layer_back < 0 || local_layer_front < 0) {
+                
+                
+                if (local_layer_back < 0 || local_layer_front < 0)
+                {
+                    // out << "DEBUG: Particle " << global_id << " depth layer not found. " 
+                    // << "current_depth=" << current_depth 
+                    // << " ztop_surface_front=" << current_point_ztop_front_vec[0] 
+                    // << " ztop_bottom_front=" << current_point_ztop_front_vec[ACTUALL_ZTOP_LAYER-1]
+                    // << " ztop_surface_back=" << current_point_ztop_back_vec[0] 
+                    // << " ztop_bottom_back=" << current_point_ztop_back_vec[ACTUALL_ZTOP_LAYER-1] 
+                    // << sycl::endl;
                     return RET0(R_NO_LAYER);
                 }
-
-                // 2) Vertical interpolation weights for level-centered fields
-                double ztop_layer_front_dn = current_point_ztop_front_vec[local_layer_front];
-                double ztop_layer_front_up = (local_layer_front > 0)
-                    ? current_point_ztop_front_vec[local_layer_front - 1]
-                    : current_point_ztop_front_vec[0];
-
-                double ztop_layer_back_dn = current_point_ztop_back_vec[local_layer_back];
-                double ztop_layer_back_up = (local_layer_back > 0)
-                    ? current_point_ztop_back_vec[local_layer_back - 1]
-                    : current_point_ztop_back_vec[0];
-
-                double x_front = current_depth;
-                double x_back  = current_depth;
-
-                x_front = sycl::max(ztop_layer_front_dn, sycl::min(x_front, ztop_layer_front_up));
-                double denom_front = ztop_layer_front_up - ztop_layer_front_dn;
-                double t_front = 0.0;
-                if (sycl::fabs(denom_front) >= 1e-12) {
-                    t_front = (x_front - ztop_layer_front_dn) / denom_front;
-                }
-                t_front = clamp01(t_front);
-
-                x_back = sycl::max(ztop_layer_back_dn, sycl::min(x_back, ztop_layer_back_up));
-                double denom_back = ztop_layer_back_up - ztop_layer_back_dn;
-                double t_back = 0.0;
-                if (sycl::fabs(denom_back) >= 1e-12) {
-                    t_back = (x_back - ztop_layer_back_dn) / denom_back;
-                }
-                t_back = clamp01(t_back);
-
-                // 3) Horizontal velocity interpolation (level-centered vec3)
-                vec3 current_point_vel_dn_front = SYCLKernel::CalcVelocity(
-                    current_cell_vertices_idx, current_cell_vertex_weight,
-                    MAX_VERTEX_NUM, current_cell_vertices_number,
-                    ACTUALL_ZTOP_LAYER, local_layer_front,
-                    acc_cellVertexVelocity_front_buf);
-
-                vec3 current_point_vel_up_front = (local_layer_front > 0)
-                    ? SYCLKernel::CalcVelocity(
-                        current_cell_vertices_idx, current_cell_vertex_weight,
-                        MAX_VERTEX_NUM, current_cell_vertices_number,
-                        ACTUALL_ZTOP_LAYER, local_layer_front - 1,
-                        acc_cellVertexVelocity_front_buf)
-                    : current_point_vel_dn_front;
-
-                vec3 final_hvel_front;
-                final_hvel_front.x() = t_front * current_point_vel_up_front.x() + (1.0 - t_front) * current_point_vel_dn_front.x();
-                final_hvel_front.y() = t_front * current_point_vel_up_front.y() + (1.0 - t_front) * current_point_vel_dn_front.y();
-                final_hvel_front.z() = t_front * current_point_vel_up_front.z() + (1.0 - t_front) * current_point_vel_dn_front.z();
-
-                vec3 current_point_vel_dn_back = SYCLKernel::CalcVelocity(
-                    current_cell_vertices_idx, current_cell_vertex_weight,
-                    MAX_VERTEX_NUM, current_cell_vertices_number,
-                    ACTUALL_ZTOP_LAYER, local_layer_back,
-                    acc_cellVertexVelocity_back_buf);
-
-                vec3 current_point_vel_up_back = (local_layer_back > 0)
-                    ? SYCLKernel::CalcVelocity(
-                        current_cell_vertices_idx, current_cell_vertex_weight,
-                        MAX_VERTEX_NUM, current_cell_vertices_number,
-                        ACTUALL_ZTOP_LAYER, local_layer_back - 1,
-                        acc_cellVertexVelocity_back_buf)
-                    : current_point_vel_dn_back;
-
-                vec3 final_hvel_back;
-                final_hvel_back.x() = t_back * current_point_vel_up_back.x() + (1.0 - t_back) * current_point_vel_dn_back.x();
-                final_hvel_back.y() = t_back * current_point_vel_up_back.y() + (1.0 - t_back) * current_point_vel_dn_back.y();
-                final_hvel_back.z() = t_back * current_point_vel_up_back.z() + (1.0 - t_back) * current_point_vel_dn_back.z();
-
-                vec3 current_hvel;
-                current_hvel.x() = alpha_for_interplate * final_hvel_back.x() + (1.0 - alpha_for_interplate) * final_hvel_front.x();
-                current_hvel.y() = alpha_for_interplate * final_hvel_back.y() + (1.0 - alpha_for_interplate) * final_hvel_front.y();
-                current_hvel.z() = alpha_for_interplate * final_hvel_back.z() + (1.0 - alpha_for_interplate) * final_hvel_front.z();
-
-                // 4) Vertical velocity interpolation (interface-centered scalar)
-                // Use the same interface pair implied by current layer bracket.
-                int dn_if_front = local_layer_front;
-                int up_if_front = (local_layer_front > 0) ? (local_layer_front - 1) : 0;
-
-                int dn_if_back = local_layer_back;
-                int up_if_back = (local_layer_back > 0) ? (local_layer_back - 1) : 0;
-
-                double w_dn_front = SYCLKernel::CalcAttribute(
-                    current_cell_vertices_idx, current_cell_vertex_weight,
-                    MAX_VERTEX_NUM, current_cell_vertices_number,
-                    ACTUALL_ZTOP_LAYER_P1, dn_if_front,
-                    acc_cellVertexVertVelocity_front_buf);
-
-                double w_up_front = SYCLKernel::CalcAttribute(
-                    current_cell_vertices_idx, current_cell_vertex_weight,
-                    MAX_VERTEX_NUM, current_cell_vertices_number,
-                    ACTUALL_ZTOP_LAYER_P1, up_if_front,
-                    acc_cellVertexVertVelocity_front_buf);
-
-                double w_front = t_front * w_up_front + (1.0 - t_front) * w_dn_front;
-
-                double w_dn_back = SYCLKernel::CalcAttribute(
-                    current_cell_vertices_idx, current_cell_vertex_weight,
-                    MAX_VERTEX_NUM, current_cell_vertices_number,
-                    ACTUALL_ZTOP_LAYER_P1, dn_if_back,
-                    acc_cellVertexVertVelocity_back_buf);
-
-                double w_up_back = SYCLKernel::CalcAttribute(
-                    current_cell_vertices_idx, current_cell_vertex_weight,
-                    MAX_VERTEX_NUM, current_cell_vertices_number,
-                    ACTUALL_ZTOP_LAYER_P1, up_if_back,
-                    acc_cellVertexVertVelocity_back_buf);
-
-                double w_back = t_back * w_up_back + (1.0 - t_back) * w_dn_back;
-
-                double current_w = alpha_for_interplate * w_back + (1.0 - alpha_for_interplate) * w_front;
-
-                // 5) attributes
-                vec3 current_point_attr_value = {0.0, 0.0, 0.0};
-
-                if (bDoubleAttributes)
+                else
                 {
-                    if (attr_count >= 1)
+                    // Calc velocity by interpolation
+                    double ztop_layer_front_dn, ztop_layer_front_up; 
+                    double ztop_layer_back_dn, ztop_layer_back_up;
+                    ztop_layer_front_dn = current_point_ztop_front_vec[local_layer_front];      
+                    ztop_layer_front_up = current_point_ztop_front_vec[local_layer_front - 1]; 
+
+                    ztop_layer_back_dn = current_point_ztop_back_vec[local_layer_back];        
+                    ztop_layer_back_up = current_point_ztop_back_vec[local_layer_back - 1];    
+
+                    double x_font = current_depth;
+                    double x_back = current_depth;
+                    
+                    x_font = sycl::max(ztop_layer_front_dn, sycl::min(x_font, ztop_layer_front_up));
+                    double denom = ztop_layer_front_up - ztop_layer_front_dn;
+                    if (sycl::fabs(denom) < 1e-12) return RET0(R_ZERO_DENOM);
+                    double t_front = (x_font - ztop_layer_front_dn) / denom;
+                    x_back = sycl::max(ztop_layer_back_dn, sycl::min(x_back, ztop_layer_back_up));
+                    denom = ztop_layer_back_up - ztop_layer_back_dn;
+                    if (sycl::fabs(denom) < 1e-12) return RET0(R_ZERO_DENOM);
+                    double t_back = (x_back - ztop_layer_back_dn) / denom;
+                
+                    vec3 final_vel_front;
+                    vec3 final_vel_back;
+                   
+                    // horizontal velocity interpolation
+                    // lower_front
+                    vec3 current_point_vel_dn_front = SYCLKernel::CalcVelocity(current_cell_vertices_idx, current_cell_vertex_weight, 
+                        MAX_VERTEX_NUM, current_cell_vertices_number, ACTUALL_ZTOP_LAYER, local_layer_front, acc_cellVertexVelocity_front_buf);
+                    // upper_front
+                    vec3 current_point_vel_up_front = SYCLKernel::CalcVelocity(current_cell_vertices_idx, current_cell_vertex_weight, 
+                        MAX_VERTEX_NUM, current_cell_vertices_number, ACTUALL_ZTOP_LAYER, local_layer_front - 1, acc_cellVertexVelocity_front_buf);
+                    
+                    final_vel_front.x() = t_front * current_point_vel_up_front.x() + (1 - t_front) * current_point_vel_dn_front.x();
+                    final_vel_front.y() = t_front * current_point_vel_up_front.y() + (1 - t_front) * current_point_vel_dn_front.y();
+                    final_vel_front.z() = t_front * current_point_vel_up_front.z() + (1 - t_front) * current_point_vel_dn_front.z();
+
+                    vec3 current_point_vel_dn_back = SYCLKernel::CalcVelocity(current_cell_vertices_idx, current_cell_vertex_weight, 
+                        MAX_VERTEX_NUM, current_cell_vertices_number, ACTUALL_ZTOP_LAYER, local_layer_back, acc_cellVertexVelocity_back_buf);
+                
+                    vec3 current_point_vel_up_back = SYCLKernel::CalcVelocity(current_cell_vertices_idx, current_cell_vertex_weight, 
+                        MAX_VERTEX_NUM, current_cell_vertices_number, ACTUALL_ZTOP_LAYER, local_layer_back - 1, acc_cellVertexVelocity_back_buf);
+                    
+                    final_vel_back.x() = t_back * current_point_vel_up_back.x() + (1 - t_back) * current_point_vel_dn_back.x();
+                    final_vel_back.y() = t_back * current_point_vel_up_back.y() + (1 - t_back) * current_point_vel_dn_back.y();
+                    final_vel_back.z() = t_back * current_point_vel_up_back.z() + (1 - t_back) * current_point_vel_dn_back.z();
+
+                    vec3 current_horizontal_velocity; 
+                    current_horizontal_velocity.x() = alpha_for_interplate * final_vel_back.x() + (1 - alpha_for_interplate) * final_vel_front.x();
+                    current_horizontal_velocity.y() = alpha_for_interplate * final_vel_back.y() + (1 - alpha_for_interplate) * final_vel_front.y();
+                    current_horizontal_velocity.z() = alpha_for_interplate * final_vel_back.z() + (1 - alpha_for_interplate) * final_vel_front.z();
+                    
+
+                    // vertical velocity interpolation
+                    int dn_if_front = local_layer_front;
+                    int up_if_front = (local_layer_front > 0) ? (local_layer_front - 1) : 0;
+
+                    // lower_front
+                    double w_dn_front = SYCLKernel::CalcAttribute(
+                        current_cell_vertices_idx, current_cell_vertex_weight,
+                        MAX_VERTEX_NUM, current_cell_vertices_number,
+                        ACTUALL_ZTOP_LAYER_P1, dn_if_front,
+                        acc_cellVertexVertVelocity_front_buf);
+                    
+                    // upper_front
+                    double w_up_front = SYCLKernel::CalcAttribute(
+                        current_cell_vertices_idx, current_cell_vertex_weight,
+                        MAX_VERTEX_NUM, current_cell_vertices_number,
+                        ACTUALL_ZTOP_LAYER_P1, up_if_front,
+                        acc_cellVertexVertVelocity_front_buf);
+
+                    double w_front = t_front * w_up_front + (1.0 - t_front) * w_dn_front;
+
+                    int dn_if_back = local_layer_back;
+                    int up_if_back = (local_layer_back > 0) ? (local_layer_back - 1) : 0;
+
+                    double w_dn_back = SYCLKernel::CalcAttribute(
+                        current_cell_vertices_idx, current_cell_vertex_weight,
+                        MAX_VERTEX_NUM, current_cell_vertices_number,
+                        ACTUALL_ZTOP_LAYER_P1, dn_if_back,
+                        acc_cellVertexVertVelocity_back_buf);
+
+                    double w_up_back = SYCLKernel::CalcAttribute(
+                        current_cell_vertices_idx, current_cell_vertex_weight,
+                        MAX_VERTEX_NUM, current_cell_vertices_number,
+                        ACTUALL_ZTOP_LAYER_P1, up_if_back,
+                        acc_cellVertexVertVelocity_back_buf);
+
+                    double w_back = t_back * w_up_back + (1.0 - t_back) * w_dn_back;
+
+                    double current_vertical_velocity = alpha_for_interplate * w_back + (1 - alpha_for_interplate) * w_front;
+                    
+                    // calc attributes
+                    vec3 current_point_attr_value = {0.0, 0.0, 0.0};
+                    double current_point_attr1_value_front = 0.0;
+                    double current_point_attr1_value_back = 0.0;
+                    double current_point_attr2_value_front = 0.0;
+                    double current_point_attr2_value_back = 0.0; 
+                    
+                    if (bDoubleAttributes)
                     {
-                        double attr_dn_front = SYCLKernel::CalcAttribute(
-                            current_cell_vertices_idx, current_cell_vertex_weight,
-                            MAX_VERTEX_NUM, current_cell_vertices_number,
-                            ACTUALL_ZTOP_LAYER, local_layer_front,
-                            acc_attr_bufs_front[0]);
+                        if (attr_count >= 1) 
+                        {
+                            // lower_front
+                            double attr_dn_front = SYCLKernel::CalcAttribute(current_cell_vertices_idx, current_cell_vertex_weight,
+                                        MAX_VERTEX_NUM, current_cell_vertices_number, ACTUALL_ZTOP_LAYER, local_layer_front, acc_attr_bufs_front[0]);
+                            // upper_front   
+                            double attr_up_front = SYCLKernel::CalcAttribute(current_cell_vertices_idx, current_cell_vertex_weight,
+                                        MAX_VERTEX_NUM, current_cell_vertices_number, ACTUALL_ZTOP_LAYER, local_layer_front - 1, acc_attr_bufs_front[0]);
+                            current_point_attr1_value_front = t_front * attr_up_front + (1 - t_front) * attr_dn_front;
 
-                        double attr_up_front = (local_layer_front > 0)
-                            ? SYCLKernel::CalcAttribute(
-                                current_cell_vertices_idx, current_cell_vertex_weight,
-                                MAX_VERTEX_NUM, current_cell_vertices_number,
-                                ACTUALL_ZTOP_LAYER, local_layer_front - 1,
-                                acc_attr_bufs_front[0])
-                            : attr_dn_front;
 
-                        double current_point_attr1_value_front = t_front * attr_up_front + (1.0 - t_front) * attr_dn_front;
+                            // lower_back
+                            double attr_dn_back = SYCLKernel::CalcAttribute(current_cell_vertices_idx, current_cell_vertex_weight,
+                                        MAX_VERTEX_NUM, current_cell_vertices_number, ACTUALL_ZTOP_LAYER, local_layer_back, acc_attr_bufs_back[0]);
+                            // upper_back
+                            double attr_up_back = SYCLKernel::CalcAttribute(current_cell_vertices_idx, current_cell_vertex_weight,
+                                        MAX_VERTEX_NUM, current_cell_vertices_number, ACTUALL_ZTOP_LAYER, local_layer_back - 1, acc_attr_bufs_back[0]);
+                            current_point_attr1_value_back = t_back * attr_up_back + (1 - t_back) * attr_dn_back;
 
-                        double attr_dn_back = SYCLKernel::CalcAttribute(
-                            current_cell_vertices_idx, current_cell_vertex_weight,
-                            MAX_VERTEX_NUM, current_cell_vertices_number,
-                            ACTUALL_ZTOP_LAYER, local_layer_back,
-                            acc_attr_bufs_back[0]);
+                            current_point_attr_value.x() = alpha_for_interplate * current_point_attr1_value_back + (1 - alpha_for_interplate) * current_point_attr1_value_front;
+                        }
+                        if (attr_count >= 2) 
+                        {
+                            // lower_front
+                            double attr_dn_front = SYCLKernel::CalcAttribute(current_cell_vertices_idx, current_cell_vertex_weight,
+                                        MAX_VERTEX_NUM, current_cell_vertices_number, ACTUALL_ZTOP_LAYER, local_layer_front, acc_attr_bufs_front[1]);
+                            // upper_front   
+                            double attr_up_front = SYCLKernel::CalcAttribute(current_cell_vertices_idx, current_cell_vertex_weight,
+                                        MAX_VERTEX_NUM, current_cell_vertices_number, ACTUALL_ZTOP_LAYER, local_layer_front - 1, acc_attr_bufs_front[1]);
+                            current_point_attr2_value_front = t_front * attr_up_front + (1 - t_front) * attr_dn_front;
 
-                        double attr_up_back = (local_layer_back > 0)
-                            ? SYCLKernel::CalcAttribute(
-                                current_cell_vertices_idx, current_cell_vertex_weight,
-                                MAX_VERTEX_NUM, current_cell_vertices_number,
-                                ACTUALL_ZTOP_LAYER, local_layer_back - 1,
-                                acc_attr_bufs_back[0])
-                            : attr_dn_back;
 
-                        double current_point_attr1_value_back = t_back * attr_up_back + (1.0 - t_back) * attr_dn_back;
+                            // lower_back
+                            double attr_dn_back = SYCLKernel::CalcAttribute(current_cell_vertices_idx, current_cell_vertex_weight,
+                                        MAX_VERTEX_NUM, current_cell_vertices_number, ACTUALL_ZTOP_LAYER, local_layer_back, acc_attr_bufs_back[1]);
+                            // upper_back
+                            double attr_up_back = SYCLKernel::CalcAttribute(current_cell_vertices_idx, current_cell_vertex_weight,
+                                        MAX_VERTEX_NUM, current_cell_vertices_number, ACTUALL_ZTOP_LAYER, local_layer_back - 1, acc_attr_bufs_back[1]);
+                            current_point_attr2_value_back = t_back * attr_up_back + (1 - t_back) * attr_dn_back;
 
-                        current_point_attr_value.x() =
-                            alpha_for_interplate * current_point_attr1_value_back +
-                            (1.0 - alpha_for_interplate) * current_point_attr1_value_front;
+                            current_point_attr_value.y() = alpha_for_interplate * current_point_attr2_value_back + (1 - alpha_for_interplate) * current_point_attr2_value_front;
+                        }
                     }
 
-                    if (attr_count >= 2)
-                    {
-                        double attr_dn_front = SYCLKernel::CalcAttribute(
-                            current_cell_vertices_idx, current_cell_vertex_weight,
-                            MAX_VERTEX_NUM, current_cell_vertices_number,
-                            ACTUALL_ZTOP_LAYER, local_layer_front,
-                            acc_attr_bufs_front[1]);
 
-                        double attr_up_front = (local_layer_front > 0)
-                            ? SYCLKernel::CalcAttribute(
-                                current_cell_vertices_idx, current_cell_vertex_weight,
-                                MAX_VERTEX_NUM, current_cell_vertices_number,
-                                ACTUALL_ZTOP_LAYER, local_layer_front - 1,
-                                acc_attr_bufs_front[1])
-                            : attr_dn_front;
+                    return {current_horizontal_velocity, current_vertical_velocity, current_point_attr_value};
+                }   
 
-                        double current_point_attr2_value_front = t_front * attr_up_front + (1.0 - t_front) * attr_dn_front;
-
-                        double attr_dn_back = SYCLKernel::CalcAttribute(
-                            current_cell_vertices_idx, current_cell_vertex_weight,
-                            MAX_VERTEX_NUM, current_cell_vertices_number,
-                            ACTUALL_ZTOP_LAYER, local_layer_back,
-                            acc_attr_bufs_back[1]);
-
-                        double attr_up_back = (local_layer_back > 0)
-                            ? SYCLKernel::CalcAttribute(
-                                current_cell_vertices_idx, current_cell_vertex_weight,
-                                MAX_VERTEX_NUM, current_cell_vertices_number,
-                                ACTUALL_ZTOP_LAYER, local_layer_back - 1,
-                                acc_attr_bufs_back[1])
-                            : attr_dn_back;
-
-                        double current_point_attr2_value_back = t_back * attr_up_back + (1.0 - t_back) * attr_dn_back;
-
-                        current_point_attr_value.y() =
-                            alpha_for_interplate * current_point_attr2_value_back +
-                            (1.0 - alpha_for_interplate) * current_point_attr2_value_front;
-                    }
-                }
-
-                return { current_hvel, current_w, current_point_attr_value };
             };
 
-            if (!bFirstLoop) {
-                if (cell_id < 0 || cell_id >= (int)acc_numberVertexOnCell_buf.get_range()[0]) {
+
+            if (bFirstLoop == false) {
+                if (cell_id < 0 || cell_id >= acc_numberVertexOnCell_buf.get_range()[0]) {
                     out << "[Error] cell_id out of range: " << cell_id << sycl::endl;
                     return;
                 }
             }
 
-            for (int i_step = 0; i_step < n_steps; i_step++)
+
+            for (auto i_step = 0; i_step < n_steps; i_step++)
             {
                 double alpha_for_interplate = (double)i_step / (double)n_steps;
+
                 runTime += deltaT;
-
                 sample_point_position = acc_sample_points_buf[global_id];
-
+                
                 int firtst_cell_id = acc_def_cell_id_buf[global_id];
 
+                current_depth = -1.0 * (double)acc_particle_depths_buf[global_id];
+               
                 if (bFirstLoop)
                 {
                     bFirstLoop = false;
                     cell_id = firtst_cell_id;
-
+                    
                     auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
-                    SYCLKernel::GetCellNeighborsIdx(
-                        cell_id,
-                        current_cell_vertices_number,
-                        cell_neig_vec,
-                        MAX_VERTEX_NUM,
-                        ACTUALL_MAX_EDGE_SIZE,
-                        acc_cells_onCell_buf);
-
+                    SYCLKernel::GetCellNeighborsIdx(cell_id, current_cell_vertices_number, cell_neig_vec, MAX_VERTEX_NUM, ACTUALL_MAX_EDGE_SIZE, acc_cells_onCell_buf);
                     int acc_wirte_pints_idx = base_idx + 0;
                     acc_wirte_points_buf[acc_wirte_pints_idx] = sample_point_position;
                 }
@@ -2167,12 +2160,10 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(
                 {
                     auto current_cell_vertices_number = acc_numberVertexOnCell_buf[cell_id];
                     double max_len = std::numeric_limits<double>::max();
-
-                    for (int idx = 0; idx < current_cell_vertices_number + 1; idx++)
+                    for (auto idx = 0; idx < current_cell_vertices_number + 1; idx++)
                     {
                         auto CID = cell_neig_vec[idx];
                         if (CID < 0 || CID >= ACTUALL_CELL_SIZE) continue;
-
                         vec3 pos = acc_cellCoord_buf[CID];
                         double len = YOSEF_LENGTH(pos - sample_point_position);
                         if (len < max_len)
@@ -2181,98 +2172,113 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(
                             cell_id = CID;
                         }
                     }
-
-                    SYCLKernel::GetCellNeighborsIdx(
-                        cell_id,
-                        current_cell_vertices_number,
-                        cell_neig_vec,
-                        MAX_VERTEX_NUM,
-                        ACTUALL_MAX_EDGE_SIZE,
-                        acc_cells_onCell_buf);
+                    SYCLKernel::GetCellNeighborsIdx(cell_id, current_cell_vertices_number, cell_neig_vec, MAX_VERTEX_NUM, ACTUALL_MAX_EDGE_SIZE, acc_cells_onCell_buf);
+                   
                 }
 
-                vec3 current_position = sample_point_position;
 
-                vec3 current_hvel;
-                double current_w = 0.0;
+                vec3 current_position = sample_point_position;
+                double r = YOSEF_LENGTH(current_position);
+                vec3 rk4_next_position = current_position;
+                
+                
+                
+                // vec3 current_velocity;
+                vec3 current_horizontal_velocity;
+                double current_vertical_velocity;
                 vec3 current_attrs;
+
+                auto AdvectOnSphere = [&](const vec3& pos, const vec3& vel, double dt_local) -> vec3 {
+                    const double rr = YOSEF_LENGTH(pos);
+                    const double speed_local = YOSEF_LENGTH(vel);
+                    if (rr < 1e-12 || speed_local < 1e-12) return pos;
+                    vec3 axis = SYCLKernel::CalcRotationAxis(pos, vel);
+                    double theta = (speed_local * dt_local) / rr;
+                    return SYCLKernel::CalcPositionAfterRotation(pos, axis, theta);
+                };
 
                 if (bEulerMethod)
                 {
-                    auto s = CalcVelocityAt(current_position, cell_id, alpha_for_interplate);
-                    current_hvel = s.hvel;
-                    current_w    = s.w;
-                    current_attrs = s.attr;
-
-                    new_position = AdvancePositionEuler(current_position, current_hvel, current_w, (double)deltaT);
+                    // Euler method
+                    auto current_velocity_attrs = CalcVelocityAt(current_position, cell_id, alpha_for_interplate);
+                    current_horizontal_velocity            = current_velocity_attrs.h_vel;
+                    current_vertical_velocity              = current_velocity_attrs.v_vel;
+                    current_attrs               = current_velocity_attrs.attr;
                 }
                 else
                 {
-                    // RK4-style sampling with decoupled horizontal+vertical update.
+                    // Runge-Kutta 4th order method
                     const double dt     = static_cast<double>(deltaT);
                     const double dalpha = dt / (double)config->simulationDuration;
+                    
+                    // k1 @ (x, t)
+                    double a1   = alpha_for_interplate;
+                    int cid1    = cell_id;
+                    auto s1     = CalcVelocityAt(current_position, cell_id, a1);
+                    vec3 k1     = s1.h_vel;
+                    vec3 A1     = s1.attr;
+                    double v1     = s1.v_vel;
 
-                    double r = YOSEF_LENGTH(current_position);
+                    // k2 @ (x + 0.5*dt*k1, t + 0.5*dt)
+                    vec3 p2     = AdvectOnSphere(current_position, k1, dt * 0.5);
+                    double a2   = a1 + 0.5 * dalpha; if (a2 > 1.0) a2 = 1.0; if (a2 < 0.0) a2 = 0.0;
+                    int  cid2   = cid1;
+                    auto s2     = CalcVelocityAt(p2, cid2, a2);
+                    vec3 k2     = s2.h_vel;
+                    vec3 A2     = s2.attr;
+                    double v2     = s2.v_vel;
 
-                    // k1
-                    double a1 = alpha_for_interplate;
-                    int cid1 = cell_id;
-                    auto s1 = CalcVelocityAt(current_position, cid1, a1);
-                    vec3 k1h = s1.hvel;
-                    double k1w = s1.w;
-                    vec3 A1 = s1.attr;
+                    // k3 @ (x + 0.5*dt*k2, t + 0.5*dt)
+                    vec3 p3     = AdvectOnSphere(current_position, k2, dt * 0.5);
+                    double a3   = a1 + 0.5 * dalpha; if (a3 > 1.0) a3 = 1.0; if (a3 < 0.0) a3 = 0.0;
+                    int  cid3   = cid1;
+                    auto s3     = CalcVelocityAt(p3, cid3, a3);
+                    vec3 k3     = s3.h_vel;
+                    vec3 A3     = s3.attr;
+                    double v3     = s3.v_vel;
 
-                    // k2
-                    vec3 p2 = AdvancePositionEuler(current_position, k1h, k1w, 0.5 * dt);
-                    double a2 = clamp01(a1 + 0.5 * dalpha);
-                    int cid2 = cid1;
-                    auto s2 = CalcVelocityAt(p2, cid2, a2);
-                    vec3 k2h = s2.hvel;
-                    double k2w = s2.w;
-                    vec3 A2 = s2.attr;
+                    // k4 @ (x + dt*k3, t + dt)
+                    vec3 p4     = AdvectOnSphere(current_position, k3, dt);
+                    double a4   = a1 + dalpha; if (a4 > 1.0) a4 = 1.0; if (a4 < 0.0) a4 = 0.0;
+                    int  cid4   = cid1;
+                    auto s4     = CalcVelocityAt(p4, cid4, a4);
+                    vec3 k4     = s4.h_vel;
+                    vec3 A4     = s4.attr;
+                    double v4     = s4.v_vel;
 
-                    // k3
-                    vec3 p3 = AdvancePositionEuler(current_position, k2h, k2w, 0.5 * dt);
-                    double a3 = clamp01(a1 + 0.5 * dalpha);
-                    int cid3 = cid1;
-                    auto s3 = CalcVelocityAt(p3, cid3, a3);
-                    vec3 k3h = s3.hvel;
-                    double k3w = s3.w;
-                    vec3 A3 = s3.attr;
+                    current_horizontal_velocity    = (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0;
+                    current_attrs       = (A1 + 2.0 * A2 + 2.0 * A3 + A4) / 6.0;
+                    current_vertical_velocity = (v1 + 2.0 * v2 + 2.0 * v3 + v4) / 6.0;
 
-                    // k4
-                    vec3 p4 = AdvancePositionEuler(current_position, k3h, k3w, dt);
-                    double a4 = clamp01(a1 + dalpha);
-                    int cid4 = cid1;
-                    auto s4 = CalcVelocityAt(p4, cid4, a4);
-                    vec3 k4h = s4.hvel;
-                    double k4w = s4.w;
-                    vec3 A4 = s4.attr;
-
-                    current_hvel  = (k1h + 2.0 * k2h + 2.0 * k3h + k4h) / 6.0;
-                    current_w     = (k1w + 2.0 * k2w + 2.0 * k3w + k4w) / 6.0;
-                    current_attrs = (A1 + 2.0 * A2 + 2.0 * A3 + A4) / 6.0;
-
-                    new_position = AdvancePositionEuler(current_position, current_hvel, current_w, dt);
+                    // Strict RK4 endpoint on position: x_{n+1} = x_n + dt * (k1 + 2k2 + 2k3 + k4) / 6,
+                    // then project back to the current sphere radius before vertical-radius update.
+                    vec3 x_trial = current_position + current_horizontal_velocity * dt;
+                    double x_trial_len = YOSEF_LENGTH(x_trial);
+                    if (x_trial_len > 1e-12) {
+                        rk4_next_position = (x_trial / x_trial_len) * r;
+                    } else {
+                        rk4_next_position = current_position;
+                    }
                     cell_id = cid4;
                 }
-
-                // Update depth state (meters positive downward).
-                // If w is positive upward/radially outward, depth decreases.
-                float old_depth = acc_sample_depths_buf[global_id];
-                float new_depth = old_depth - (float)(current_w * (double)deltaT);
-                acc_sample_depths_buf[global_id] = new_depth;
-
-                // Store total velocity = horizontal + radial component
-                double r_new_base = YOSEF_LENGTH(current_position);
-                vec3 radial_dir = (r_new_base > 1e-12) ? (current_position / r_new_base) : vec3(0.0);
-                vec3 total_velocity = current_hvel + current_w * radial_dir;
-
+                
+                if (bEulerMethod)
+                {
+                    vec3 rotationAxis = SYCLKernel::CalcRotationAxis(current_position, current_horizontal_velocity);
+                    double speed = YOSEF_LENGTH(current_horizontal_velocity);
+                    double theta_rad = (speed * deltaT) / r;
+                    new_position = SYCLKernel::CalcPositionAfterRotation(current_position, rotationAxis, theta_rad);
+                }
+                else
+                {
+                    new_position = rk4_next_position;
+                }
+                
                 if (bFirstVel)
                 {
                     bFirstVel = false;
                     int acc_wirte_pints_idx = base_idx + 0;
-                    acc_write_vels_buf[acc_wirte_pints_idx] = total_velocity;
+                    acc_write_vels_buf[acc_wirte_pints_idx] = current_horizontal_velocity;
                 }
 
                 if (bFirstAttr && bDoubleAttributes)
@@ -2282,13 +2288,25 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(
                     acc_write_attrs_buf[acc_wirte_pints_idx] = current_attrs;
                 }
 
-                acc_sample_points_buf[global_id] = new_position;
+                // Update depth using signed vertical velocity.
+                // Convention: particle depth is positive downward; MPAS vertical velocity is positive upward.
+                const double old_depth = (double)acc_particle_depths_buf[global_id];
+                double new_depth = old_depth - current_vertical_velocity * (double)deltaT;
+                new_depth = sycl::fmax(0.0, new_depth);
 
+                // Keep particle position on sphere with updated radius.
+                double r_new = sycl::fmax(1.0, r + current_vertical_velocity * (double)deltaT);
+                acc_particle_depths_buf[global_id] = (float)new_depth;
+                new_position = sycl::normalize(new_position) * r_new;
+                acc_sample_points_buf[global_id] = new_position;
+                    
                 if ((i_step + 1) % (recordT / deltaT) == 0)
                 {
                     int acc_wirte_pints_idx = base_idx + update_points_idx;
                     acc_wirte_points_buf[acc_wirte_pints_idx] = new_position;
-                    acc_write_vels_buf[acc_wirte_pints_idx] = total_velocity;
+                    acc_write_vels_buf[acc_wirte_pints_idx] = current_horizontal_velocity;
+                    
+
                     if (bDoubleAttributes)
                     {
                         acc_write_attrs_buf[acc_wirte_pints_idx] = current_attrs;
@@ -2297,8 +2315,9 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(
                 }
             }
         });
+        
+      
     });
-
     try {
         sycl_Q.wait();
     } catch (sycl::exception const& e) {
@@ -2307,13 +2326,15 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(
     }
 
     Debug("[VisualizeTrajectory]::Finished...");
-
-    auto after_write_p = wirte_points_buf.get_host_access(sycl::read_only);
-    auto after_write_v = write_vels_buf.get_host_access(sycl::read_only);
-    auto after_write_a = write_attrs_buf.get_host_access(sycl::read_only);
-    auto after_depths  = sample_depths_buf.get_host_access(sycl::read_only);
+    // auto after_write_p = wirte_points_buf.get_access<sycl::access::mode::read>();
+    auto after_write_p = wirte_points_buf.get_host_access(sycl::read_only); // XYZ
+    auto after_write_v = write_vels_buf.get_host_access(sycl::read_only); // XYZ
+    auto after_write_a = write_attrs_buf.get_host_access(sycl::read_only); // RGB
+    std::vector<CartesianCoord> last_points;
+    
 
     // update trajectory_lines
+    size_t line_idx = 0;
     size_t each_point_size = config->simulationDuration / config->recordT;
     size_t total_points = update_points.size();
     size_t total_lines = trajectory_lines.size();
@@ -2326,7 +2347,6 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(
             vec3 p = after_write_p[i];
             vec3 v = after_write_v[i];
             vec3 a = after_write_a[i];
-
             trajectory_lines[line_idx].points.push_back(p);
             trajectory_lines[line_idx].velocity.push_back(v);
             trajectory_lines[line_idx].temperature.push_back(v.x());
@@ -2336,12 +2356,13 @@ std::vector<TrajectoryLine> MPASOVisualizer::PathLine(
                 trajectory_lines[line_idx].lastPoint = p;
             }
         }
-
-        // store final depth back
-        trajectory_lines[line_idx].depth = after_depths[line_idx];
     });
 
+    // return trajectory_lines;
     auto clean_traj = removeNaNTrajectoriesAndReindex(trajectory_lines);
     trajectory_lines.clear();
     return clean_traj;
 }
+
+
+

@@ -123,7 +123,7 @@ vec3 SYCLKernel::CalcVelocity(size_t* current_cell_vertices_idx, double* current
             sycl::accessor<vec3, 1, sycl::access::mode::read> acc_cellVertexVelocity_buf)
 {
     vec3 current_point_vel1 = { 0.0, 0.0, 0.0 };
-    const int VLA_SIZE = 20;
+    const int VLA_SIZE = 10;
     vec3 vertex_vel1[VLA_SIZE];
     for (auto v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx)
     {
@@ -149,7 +149,7 @@ double SYCLKernel::CalcAttribute(size_t* current_cell_vertices_idx, double* curr
                                     sycl::accessor<double, 1, sycl::access::mode::read> acc_cellAttribute_buf)
 {
     double current_point_attr_value = 0.0;
-    const int VLA_SIZE = 20;
+    const int VLA_SIZE = 10;
     double vertex_value1[VLA_SIZE];
     for (auto v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx)
     {

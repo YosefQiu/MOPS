@@ -1,7 +1,7 @@
 from pyMOPSAPI import *
 
 
-def run_streamline_from_latlon_depth(
+def run_streamline_from_lat_lon_depth(
     sl: "MOPSStreamline",            # your existing object (already .init(...) done)
     start_date: str,                 # e.g., "0018-01-01"
     duration_seconds: int | None = None,
@@ -19,9 +19,9 @@ def run_streamline_from_latlon_depth(
     """
       1) Load (lat, lon, depth).
       2) Build unit directions on the sea surface.
-      3) Group seeds by depth (≈ equal within tol).
-      4) For each depth group: place seeds at that r = R - depth, set cfg.depth=group depth, run().
-      5) Concatenate outputs and inject 'depth' into each line-dict for provenance.
+            3) Place each particle on its own depth radius r = R - depth.
+            4) Run once with per-particle depths.
+            5) Inject depth into each line-dict for provenance.
     """
     # 0) load data
     if is_file:
@@ -37,31 +37,30 @@ def run_streamline_from_latlon_depth(
         raise ValueError(f"latlon_depth must be (N,3) [lat, lon, depth], got {arr.shape}")
 
     lat, lon, dep = arr[:,0], arr[:,1], arr[:,2]
-    unit_xyz = latlon_to_unit_xyz(lat, lon)
+    unit_xyz = lat_lon_to_unit_xyz(lat, lon)
 
     # 1) set time (single timestep streamline)
     sl.set_time(start=start_date, duration_seconds=duration_seconds, duration_ymd=duration_ymd)
 
-    # 2) group by depth
-    groups = group_depths(dep, tol_m=depth_tol_m)
+    # 2) place each seed at its own depth and run once
+    seeds_xyz = np.zeros_like(unit_xyz)
+    for i in range(len(dep)):
+        r = earth_radius - dep[i]
+        seeds_xyz[i] = unit_xyz[i] * r
 
-    all_lines: List[Dict] = []
-    for depth_val, idx in groups:
-        # place these seeds at this depth
-        seeds_xyz = place_on_depth(unit_xyz[idx], depth_val, earth_radius=earth_radius)
+    sl.set_seed(depths=dep, points=seeds_xyz, first_point=first_point, follow_last=True)
+    seg = sl.run(method=method, delta_minutes=delta_minutes, record_every_minutes=record_every_minutes)
 
-        # keep API intact: set a single depth and pass points
-        sl.set_seed(depth=depth_val, points=seeds_xyz, first_point=first_point)
+    # 3) annotate depth for provenance (streamline binding does not include depth yet)
+    for i, d in enumerate(seg):
+        if i < len(dep):
+            d["depth"] = float(dep[i])
+    return seg
 
-        # run one batch
-        seg = sl.run(method=method, delta_minutes=delta_minutes, record_every_minutes=record_every_minutes)
 
-        # annotate with depth for provenance
-        for d in seg:
-            d["depth"] = depth_val
-        all_lines.extend(seg)
-
-    return all_lines
+def run_streamline_from_latlon_depth(*args, **kwargs):
+    """Backward-compatible alias."""
+    return run_streamline_from_lat_lon_depth(*args, **kwargs)
 
 def example1():
     yaml_path   = "/pscratch/sd/q/qiuyf/MOPS_Tutorial/test.yaml"
@@ -81,7 +80,7 @@ def example1():
 def example2():
     yaml_path   = "/pscratch/sd/q/qiuyf/MOPS_Tutorial/test.yaml"
     sl = MOPSStreamline(yaml_path).init("gpu")
-    lines = run_streamline_from_latlon_depth(
+    lines = run_streamline_from_lat_lon_depth(
         sl,
         start_date="0015-01-01",
         duration_ymd=(0,0,5),

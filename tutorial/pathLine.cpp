@@ -165,14 +165,14 @@ void tutorial_pathLine(const std::string name_prefix, float fixed_depth, bool is
 	
 	MOPS::TrajectorySettings* traj_conf = new MOPS::TrajectorySettings;
 	traj_conf->directionType = MOPS::CalcDirection::kForward;
-	traj_conf->methodType = MOPS::CalcMethodType::kEuler;
+	traj_conf->methodType = MOPS::CalcMethodType::kRK4;
 	traj_conf->depth = fixed_depth;  // Used in uniform depth mode or as fallback
 #ifdef USE_PER_PARTICLE_DEPTH
 	traj_conf->particle_depths = sample_depths;  // Per-particle depths
 #endif
 	traj_conf->deltaT = ONE_MINUTE * 10;			
 	traj_conf->simulationDuration = std::abs(day_gap);
-	traj_conf->recordT = ONE_DAY * 10;
+	traj_conf->recordT = ONE_HOUR * 6;
     auto direction_str = (traj_conf->directionType == MOPS::CalcDirection::kForward) ? "FORWARD" : "BACKWARD";
 
 	auto tiltle = name_prefix + "_";
@@ -228,8 +228,10 @@ void tutorial_pathLine(const std::string name_prefix, float fixed_depth, bool is
 			const auto& p = last_pts[i];
 			lastPts_vec.push_back(CartesianCoord{p.x(), p.y(), p.z()});
 #ifdef USE_PER_PARTICLE_DEPTH
-			// Save the depth for this particle (from the trajectory line)
-			lastDepths_vec.push_back(lines[i].depth);
+			// Save evolved depth from the last valid XYZ point (depth positive downward).
+			const double earthRadius = 6371010.0;
+			double r = std::sqrt(p.x() * p.x() + p.y() * p.y() + p.z() * p.z());
+			lastDepths_vec.push_back(static_cast<float>(earthRadius - r));
 #endif
 		}
 	}

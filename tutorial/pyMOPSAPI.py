@@ -285,7 +285,6 @@ def Vis_PathLines(
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.show()
 
-@deprecated("There may be bugs. Refer to MOPSPathline for a more reliable implementation.")
 class MOPSStreamline:
     """
     MOPSStreamline: a Python wrapper for single-timestep streamline tracing.
@@ -304,7 +303,11 @@ class MOPSStreamline:
         self._seed_conf = None
         self._seed_points = None
         self._first_point = None
+        self._follow_last = True
+        self._first_round = True
+        self._last_pt = None
         self._depth = None
+        self._particle_depths = None
         self._one_min = 60
 
         self._start = None
@@ -312,6 +315,12 @@ class MOPSStreamline:
         self._duration_ymd = None
 
         self._sol = pyMOPS.MPASOSolution()
+
+    def reset_segments(self):
+        """Reset continuation state so next run starts from original seeds."""
+        self._first_round = True
+        self._last_pt = None
+        return self
 
     # ---------- Utilities ----------
 
@@ -380,20 +389,48 @@ class MOPSStreamline:
 
     # ---------- Step 2: Set time configuration ----------
 
-    def set_time(self, start: str | tuple[int, int, int],
+    def set_time(self, *args,
+                 start: str | tuple[int, int, int] | None = None,
                  duration_seconds: int | None = None,
                  duration_ymd: tuple[int, int, int] | None = None,
                  direction: str = "forward"):
         """
         Define the start date and duration for streamline integration.
+
+        Compatible modes:
+          1) Pathline-like: set_time(sy, sm, ey, em, direction="forward")
+          2) Original    : set_time(start="YYYY-MM-DD", duration_seconds=...)
+                         or set_time(start=(y,m,d), duration_ymd=(Y,M,D))
+
         Args:
             start: "YYYY-MM-DD" or (year, month, day)
             duration_seconds: integration duration in seconds
             duration_ymd: (years, months, days), optional alternative form
         """
-        
+
         self.direction = direction.lower()
-        
+
+        # Pathline-like signature: (sy, sm, ey, em)
+        if len(args) == 4:
+            sy, sm, ey, em = map(int, args)
+            self._start = f"{sy:04d}-{sm:02d}-01"
+            start_dt = datetime.strptime(self._start, "%Y-%m-%d")
+            end_dt = datetime.strptime(f"{ey:04d}-{em:02d}-01", "%Y-%m-%d")
+            self._duration_seconds = int(abs((end_dt - start_dt).total_seconds()))
+            self._duration_ymd = None
+            if self._duration_seconds <= 0:
+                raise ValueError("invalid time range: start and end month are identical")
+            return self
+
+        # Backward-compatible single positional argument for start
+        if len(args) == 1 and start is None:
+            start = args[0]
+        elif len(args) > 0:
+            raise ValueError("set_time accepts either (sy,sm,ey,em) or start=... form")
+
+        if start is None:
+            raise ValueError("start must be provided")
+
         if isinstance(start, tuple):
             self._start = f"{start[0]:04d}-{start[1]:02d}-{start[2]:02d}"
         else:
@@ -409,11 +446,13 @@ class MOPSStreamline:
     # ---------- Step 3: Set seed configuration ----------
 
     def set_seed(self,
-                 depth: float,
+                 depth: float = None,
+                 depths: np.ndarray | list | None = None,
                  lat_range: tuple = None,
                  lon_range: tuple = None,
                  grid: tuple = (2, 2),
                  points: np.ndarray | list | None = None,
+                 follow_last: bool = True,
                  first_point: list | tuple | np.ndarray | None = None):
         """
         Define particle seed points.
@@ -421,8 +460,17 @@ class MOPSStreamline:
             A) Provide 'points' as (N,3) Cartesian coordinates
             B) Provide 'lat_range', 'lon_range', and 'grid' for auto sampling
         """
-        self._depth = float(depth)
+        self._follow_last = bool(follow_last)
         self._first_point = np.array(first_point, float) if first_point is not None else None
+
+        if depths is not None:
+            self._particle_depths = np.asarray(depths, dtype=np.float32).flatten()
+            self._depth = float(self._particle_depths[0])
+        elif depth is not None:
+            self._depth = float(depth)
+            self._particle_depths = None
+        else:
+            raise ValueError("must provide either 'depth' (scalar) or 'depths' (array)")
 
         if points is not None:
             arr = np.asarray(points, dtype=float)
@@ -430,9 +478,13 @@ class MOPSStreamline:
                 raise ValueError("points must be a (N,3) array")
             self._seed_points = arr.copy()
             self._seed_conf = None
+            if self._particle_depths is not None and len(self._particle_depths) != arr.shape[0]:
+                raise ValueError(f"depths length ({len(self._particle_depths)}) must match points count ({arr.shape[0]})")
         else:
             if not (lat_range and lon_range):
                 raise ValueError("When points is None, lat_range & lon_range must be provided.")
+            if self._particle_depths is not None:
+                raise ValueError("per-particle depths only supported when providing explicit points")
             nx, ny = grid
             conf = pyMOPS.SeedsSettings()
             conf.setSeedsRange((int(nx), int(ny)))
@@ -468,12 +520,21 @@ class MOPSStreamline:
         pyMOPS.MOPS_ActiveAttribute(self._sol.getID(), None)
 
         # Prepare seed points
-        if self._seed_points is not None:
+        if (not self._first_round) and self._follow_last and self._last_pt is not None:
+            seeds = np.asarray(self._last_pt, dtype=np.float64, order="C")
+        elif self._seed_points is not None:
             seeds = np.asarray(self._seed_points, dtype=np.float64, order="C")
         else:
             seeds = pyMOPS.MOPS_GenerateSeedsPoints(self._seed_conf)
         if self._first_point is not None and seeds.shape[0] > 0:
             seeds[0] = self._first_point
+
+        # Keep per-particle depths consistent with continuation seeds.
+        if self._particle_depths is not None and (not self._first_round) and self._follow_last:
+            radii = np.linalg.norm(seeds, axis=1)
+            next_depths = EARTH_RADIUS_M - radii
+            next_depths = np.clip(next_depths, 0.0, None)
+            self._particle_depths = next_depths.astype(np.float32, copy=False)
 
         # Build trajectory configuration
         method_flag = pyMOPS.CalcMethodType.kRK4 if method.lower() == "rk4" else pyMOPS.CalcMethodType.kEuler
@@ -483,6 +544,8 @@ class MOPSStreamline:
         cfg.deltaT = int(delta_minutes) * self._one_min
         cfg.recordT = int(record_every_minutes) * self._one_min
         cfg.methodType = method_flag
+        if self._particle_depths is not None:
+            cfg.particle_depths = self._particle_depths.tolist()
         if self.direction == "forward":
             cfg.directionType = pyMOPS.CalcDirection.kForward
         else:
@@ -492,12 +555,26 @@ class MOPSStreamline:
         if self._duration_seconds is not None:
             cfg.simulationDuration = int(self._duration_seconds)
         else:
-            y, m, d = self._duration_ymd
-            approx_days = y * 365 + m * 30 + d
-            cfg.simulationDuration = approx_days * 24 * 3600
+            end = self._ymd_add(self._start, self._duration_ymd)
+            start_dt = datetime.strptime(self._start, "%Y-%m-%d")
+            end_dt = datetime.strptime(end, "%Y-%m-%d")
+            cfg.simulationDuration = int(abs((end_dt - start_dt).total_seconds()))
+            if cfg.simulationDuration <= 0:
+                raise ValueError("duration_ymd results in zero duration")
 
         # Execute the streamline integration
         seg = pyMOPS.MOPS_RunStreamLine(cfg, seeds)
+
+        # Update continuation state using the last point of each line.
+        if len(seg) > 0:
+            self._last_pt = np.stack([np.asarray(seg[i]["points"])[-1] for i in range(len(seg))]).astype(float, copy=False)
+            if self._particle_depths is not None:
+                radii = np.linalg.norm(self._last_pt, axis=1)
+                next_depths = EARTH_RADIUS_M - radii
+                next_depths = np.clip(next_depths, 0.0, None)
+                self._particle_depths = next_depths.astype(np.float32, copy=False)
+        self._first_round = False
+
         return seg
 
 
@@ -784,6 +861,14 @@ class MOPSPathline:
                         seeds = self._seed_points.copy()
                     else:
                         seeds = pyMOPS.MOPS_GenerateSeedsPoints(self._seed_conf)
+
+            # Keep per-particle depths consistent with continuation seeds.
+            # This mirrors the C++ tutorial fix that recomputes depths from last valid XYZ points.
+            if self._particle_depths is not None and self._follow_last and not self._first_round:
+                radii = np.linalg.norm(seeds, axis=1)
+                next_depths = EARTH_RADIUS_M - radii
+                next_depths = np.clip(next_depths, 0.0, None)
+                self._particle_depths = next_depths.astype(np.float32, copy=False)
                         
             # trajectory config
             cfg = pyMOPS.TrajectorySettings()
@@ -803,6 +888,13 @@ class MOPSPathline:
 
             # Update last_pt
             self._last_pt = np.stack([seg[i]["lastPoint"] for i in range(len(seg))]).astype(float, copy=False)
+
+            # For per-particle depth mode, propagate evolved depths to next segment.
+            if self._particle_depths is not None:
+                radii = np.linalg.norm(self._last_pt, axis=1)
+                next_depths = EARTH_RADIUS_M - radii
+                next_depths = np.clip(next_depths, 0.0, None)
+                self._particle_depths = next_depths.astype(np.float32, copy=False)
 
             if lines_acc is None:
                 lines_acc = seg

@@ -357,7 +357,10 @@ namespace MOPS
 
 					double longitude = latlon.y();  // longitudes
 					double latitude = latlon.x();   // latitude
-					double altitude = traj.depth;
+					// Export per-point depth (positive downward) so vertical motion is preserved in VTP.
+					const double earthRadius = 6371010.0;
+					double r = std::sqrt(p_copy.x() * p_copy.x() + p_copy.y() * p_copy.y() + p_copy.z() * p_copy.z());
+					double altitude = earthRadius - r;
 
 					// Wraparound check
 					if (!firstPoint) {
