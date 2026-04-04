@@ -58,6 +58,13 @@ void MPASOSolution::initSolution(MPASOReader* reader)
     mID.timestep = this->mTimesteps;
 
 
+    cellVertexZTop_vec.resize(0);
+    cellVertexMeridionalVelocity_vec.resize(0);
+    cellVertexZonalVelocity_vec.resize(0);
+    cellVertexVertVelocity_vec.resize(0);
+    cellCenterVelocity_vec.resize(0);
+    cellVertexVelocity_vec.resize(0);
+
     // std::cout << "mTimeStamp = " << this->mTimeStamp << std::endl;
     // std::cout << "mVertLevels = " << this->mVertLevels << std::endl;
     // std::cout << "mVertLevelsP1 = " << this->mVertLevelsP1 << std::endl;
