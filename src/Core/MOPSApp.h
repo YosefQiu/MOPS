@@ -3,7 +3,7 @@
 #include "Core/MPASOGrid.h"
 #include "Core/MPASOSolution.h"
 #include "Core/MPASOField.h"
-#include "SYCL/ImageBuffer.hpp"
+#include "Common/ImageBuffer.hpp"
 #include "Core/MPASOVisualizer.h"
 #include <memory>
 

@@ -5,7 +5,8 @@
 #include "Utils/YamlGen.hpp"
 #include "IO/VTKFileManager.hpp"
 #include "IO/MPASOReader.h"
-#include "SYCL/ImageBuffer.hpp"
+#include "Common/ImageBuffer.hpp"
+#include "Core/GPUContext.h"
 
 
 float fixed_depth = 10.0;
@@ -18,15 +19,21 @@ void tutoral_regrid(MOPS::MPASOGrid* mpasoGrid, MOPS::MPASOSolution* solFront, M
 	const int re_grid_h = mpasoGrid->cellRefBottomDepth_vec.size();
 
 	MOPS::VisualizationSettings* vis_config = new MOPS::VisualizationSettings();
-	vis_config->imageSize = vec2(re_grid_w, re_grid_h);
-	vis_config->DepthRange = vec2(mpasoGrid->cellRefBottomDepth_vec[0], mpasoGrid->cellRefBottomDepth_vec.back()); 
-	vis_config->LonRange = vec2(-180.0, 180.0);
+	vis_config->imageSize = vec2{static_cast<double>(re_grid_w), static_cast<double>(re_grid_h)};
+	vis_config->DepthRange = vec2{mpasoGrid->cellRefBottomDepth_vec[0], mpasoGrid->cellRefBottomDepth_vec.back()}; 
+	vis_config->LonRange = vec2{-180.0, 180.0};
 	vis_config->FixedLatitude = 40.0f;
 
-	sycl::queue q(sycl::default_selector_v);
 	MOPS::ImageBuffer<double>* img = new MOPS::ImageBuffer<double>(re_grid_w, re_grid_h);
 	std::cout << "== regrid and visualize at fixed latitude ==" << std::endl;
-	MOPS::MPASOVisualizer::VisualizeFixedLatitude(mpasoF, vis_config, img, q);
+	MOPS::GPUContext gpu_ctx;
+	#if defined(MOPS_USE_CUDA) && (MOPS_USE_CUDA == 1)
+	gpu_ctx = MOPS::GPUContext::FromCUDA(nullptr);
+	#elif defined(MOPS_USE_SYCL) && (MOPS_USE_SYCL == 1)
+	sycl::queue q(sycl::default_selector_v);
+	gpu_ctx = MOPS::GPUContext::FromSYCL(q);
+	#endif
+	MOPS::MPASOVisualizer::VisualizeFixedLatitude(mpasoF, vis_config, img, gpu_ctx);
 	std::cout << "== save regridded image ==" << std::endl;
 	// save as image use stb_image
 	MOPS::SaveToPNG<double>(*img, "E.png", 0);
@@ -66,7 +73,11 @@ void IO()
 	
 	mpasoGrid->initGrid(MOPS::MPASOReader::readGridData(yaml_path).get());
 
-    MOPS::MOPS_Init("gpu");
+	#if defined(MOPS_USE_TBB) && (MOPS_USE_TBB == 1)
+	MOPS::MOPS_Init("cpu");
+	#else
+	MOPS::MOPS_Init("gpu");
+	#endif
 
 	MOPS::MOPS_Begin();
     MOPS::MOPS_AddGridMesh(mpasoGrid);

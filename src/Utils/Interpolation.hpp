@@ -11,15 +11,15 @@ namespace MOPS
         struct TRIANGLE
         {
             vec3 v[3];
-            TRIANGLE() = default;
-            TRIANGLE(vec3 v1, vec3 v2, vec3 v3)
+            MOPS_HOST_DEVICE TRIANGLE() {}
+            MOPS_HOST_DEVICE TRIANGLE(const vec3& v1, const vec3& v2, const vec3& v3)
             {
                 v[0] = v1;
                 v[1] = v2;
                 v[2] = v3;
             }
         };
-        static double calcTriangleArea(TRIANGLE& tri)
+        MOPS_HOST_DEVICE static inline double calcTriangleArea(TRIANGLE& tri)
         {
             auto A = tri.v[0];
             auto B = tri.v[1];
@@ -28,8 +28,8 @@ namespace MOPS
             auto AB = B - A;
             auto AC = C - A;
 
-            auto tmp_cross = YOSEF_CROSS(AB, AC);
-            auto tmp_length = YOSEF_LENGTH(tmp_cross);
+            auto tmp_cross = MOPS_CROSS(AB, AC);
+            auto tmp_length = MOPS_LENGTH(tmp_cross);
             return 0.5 * tmp_length;
         }
         /*
@@ -76,23 +76,23 @@ namespace MOPS
                 );
         }*/
 
-        static void calcTriangleBarycentric(const vec3& p, TRIANGLE* tri, double& u, double& v, double& w)
+        MOPS_HOST_DEVICE static inline void calcTriangleBarycentric(const vec3& p, TRIANGLE* tri, double& u, double& v, double& w)
         {
             auto v0 = tri->v[1] - tri->v[0];
             auto v1 = tri->v[2] - tri->v[0];
             auto v2 = p - tri->v[0];
-            double d00 = YOSEF_DOT(v0, v0);
-            double d01 = YOSEF_DOT(v0, v1);
-            double d11 = YOSEF_DOT(v1, v1);
-            double d20 = YOSEF_DOT(v2, v0);
-            double d21 = YOSEF_DOT(v2, v1);
+            double d00 = MOPS_DOT(v0, v0);
+            double d01 = MOPS_DOT(v0, v1);
+            double d11 = MOPS_DOT(v1, v1);
+            double d20 = MOPS_DOT(v2, v0);
+            double d21 = MOPS_DOT(v2, v1);
             double denom = d00 * d11 - d01 * d01;
             v = (d11 * d20 - d01 * d21) / denom;
             w = (d00 * d21 - d01 * d20) / denom;
             u = 1.0 - v - w;
         }
 
-        static double triangle_area(const vec3& a, const vec3& b, const vec3& c)
+        MOPS_HOST_DEVICE static inline double triangle_area(const vec3& a, const vec3& b, const vec3& c)
         {
             // Calculate the vectors for two edges of the triangle
             vec3 edge1 = {b.x() - a.x(), b.y() - a.y(), b.z() - a.z()};
@@ -134,7 +134,7 @@ namespace MOPS
                 weights[i] *= recp;
             }
         }
-        static void CalcPolygonWachspress(const vec3& p, vec3* poly, double* weights, const int vertex_number)
+        MOPS_HOST_DEVICE static inline void CalcPolygonWachspress(const vec3& p, vec3* poly, double* weights, const int vertex_number)
         {
             int N = vertex_number;
             
@@ -166,12 +166,12 @@ namespace MOPS
 
     // RBF interpolation
     #define MAX_EDGE 8
-        static double evaluate_rbf(double rSquared)
+        MOPS_HOST_DEVICE static inline double evaluate_rbf(double rSquared)
         {
-            return 1.0 / sycl::sqrt(1.0 + rSquared);
+            return 1.0 / MOPS::math::sqrt(1.0 + rSquared);
         }
 
-        static void gauss_elimination_fixed(double A[MAX_EDGE][MAX_EDGE], double b[MAX_EDGE], int n, double x[MAX_EDGE])
+        MOPS_HOST_DEVICE static inline void gauss_elimination_fixed(double A[MAX_EDGE][MAX_EDGE], double b[MAX_EDGE], int n, double x[MAX_EDGE])
         {
             int pivot[MAX_EDGE];
             for (int i = 0; i < n; i++)
@@ -184,10 +184,12 @@ namespace MOPS
                 int maxRow = j;
                 for (int i = j + 1; i < n; ++i) 
                 {
-                    if (sycl::fabs(A[pivot[i]][j]) > sycl::fabs(A[pivot[maxRow]][j]))
+                    if (MOPS::math::fabs(A[pivot[i]][j]) > MOPS::math::fabs(A[pivot[maxRow]][j]))
                         maxRow = i;
                 }
-                std::swap(pivot[j], pivot[maxRow]);
+                int tmp = pivot[j];
+                pivot[j] = pivot[maxRow];
+                pivot[maxRow] = tmp;
 
                 for (int i = j + 1; i < n; ++i) 
                 {
@@ -215,7 +217,7 @@ namespace MOPS
         }
         
 
-        static double compute_alpha(const double sourcePoints[MAX_EDGE][3], int pointCount, const double cellCenter[3])
+        MOPS_HOST_DEVICE static inline double compute_alpha(const double sourcePoints[MAX_EDGE][3], int pointCount, const double cellCenter[3])
         {
             double sum = 0.0;
             for (int i = 0; i < pointCount; ++i) 
@@ -223,13 +225,13 @@ namespace MOPS
                 double dx = sourcePoints[i][0] - cellCenter[0];
                 double dy = sourcePoints[i][1] - cellCenter[1];
                 double dz = sourcePoints[i][2] - cellCenter[2];
-                double r = sycl::sqrt(dx * dx + dy * dy + dz * dz);
+                double r = MOPS::math::sqrt(dx * dx + dy * dy + dz * dz);
                 sum += r;
             }
             return (pointCount > 0) ? sum / pointCount : 1.0;
         }
 
-        static void mpas_rbf_interp_func_3D_plane_vec_const_dir_comp_coeffs(
+        MOPS_HOST_DEVICE static inline void mpas_rbf_interp_func_3D_plane_vec_const_dir_comp_coeffs(
             int pointCount,
             const double sourcePoints[MAX_EDGE][3],
             const double unitVectors[MAX_EDGE][3],

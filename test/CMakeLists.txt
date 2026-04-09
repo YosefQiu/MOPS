@@ -1,5 +1,10 @@
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/test)
 
+if(NOT MOPS_BACKEND STREQUAL "SYCL")
+  message(STATUS "test/: skipped because MOPS_BACKEND=${MOPS_BACKEND} (SYCL-only tests)")
+  return()
+endif()
+
 add_library(catch_main OBJECT impl.cpp)
 target_include_directories(catch_main PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

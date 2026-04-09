@@ -15,7 +15,14 @@
 cd $PSCRATCH
 git clone https://github.com/YosefQiu/MOPS.git
 cd MOPS
-source ./script/compile.sh
+# use CUDA backend
+source ./script/compiler_cuda.sh
+# use SYCL backend
+source ./script/compiler_sycl.sh
+# use HIP backend
+source ./script/compiler_hip.sh
+# use TBB backend
+source ./script/compiler_tbb.sh
 ```
 ### **2️⃣ Use [Spack](https://github.com/spack/spack)** (will be update use a new repo)
 > ### 🔗  check [spack_test](https://github.com/YosefQiu/spack_test) for more details.

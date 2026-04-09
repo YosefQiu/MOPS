@@ -3,6 +3,7 @@
 #include <memory>
 #include <mutex>
 #include <vector>
+#include <cstring>
 
 #define MAX_PATH_FOR_LOG	256
 #define MAX_LOG_LENGTH		10240

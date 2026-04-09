@@ -1,4 +1,4 @@
-﻿#include "SYCL/ImageBuffer.hpp"
+﻿#include "Common/ImageBuffer.hpp"
 #include "ggl.h"
 #include "api/MOPS.h"
 #include "Utils/cxxopts.hpp"
@@ -86,7 +86,11 @@ int main(int argc, char* argv[])
 	for (auto rank_id = 0; rank_id < size; rank_id++)
 	{
 		// 1. initialize MOPS
+		#if defined(MOPS_USE_TBB) && (MOPS_USE_TBB == 1)
+		MOPS::MOPS_Init("cpu");
+		#else
 		MOPS::MOPS_Init("gpu");
+		#endif
 		// 2. initialize grid and solutions
 		std::vector<int> timestep_vec; 
 		if (time_range_vec.size() == 0) timestep_vec.push_back(timestep);
@@ -132,15 +136,15 @@ int main(int argc, char* argv[])
 			//6. run remapping
 			constexpr int width = 3601; constexpr int height = 1801;
 			MOPS::VisualizationSettings* config = new MOPS::VisualizationSettings();
-			config->imageSize = vec2(width, height);
-			config->LatRange = vec2(-90.0, 90.0);
-			config->LonRange = vec2(-180.0, 180.0);
+			config->imageSize = vec2{static_cast<double>(width), static_cast<double>(height)};
+			config->LatRange = vec2{-90.0, 90.0};
+			config->LonRange = vec2{-180.0, 180.0};
 			config->FixedDepth = fixed_depth;
 			config->TimeStep = timestep_vec[idx];
 			#if MOPS_VTK
-			config->SaveType = MOPS::SaveType::kVTI;
+			config->saveType = MOPS::SaveType::kVTI;
 			#else
-			config->SaveType = MOPS::SaveType::kPNG;
+			config->saveType = MOPS::SaveType::kPNG;
 			#endif
 			auto img_vec = MOPS::MOPS_RunRemapping(config);
 			#if MOPS_VTK
@@ -156,13 +160,13 @@ int main(int argc, char* argv[])
 				};
 			#endif
 
-			if (config->SaveType == MOPS::SaveType::kVTI)
+			if (config->saveType == MOPS::SaveType::kVTI)
 			{
 				#if MOPS_VTK
 				MOPS::VTKFileManager::SaveVTI(img_vec, config, names, str);
 				#endif
 			}
-			else if (config->SaveType == MOPS::SaveType::kPNG)
+			else if (config->saveType == MOPS::SaveType::kPNG)
 			{
 				for (int i = 0; i < img_vec.size(); ++i)
 				{
@@ -190,8 +194,8 @@ int main(int argc, char* argv[])
 		std::vector<CartesianCoord> tmp_pts;
 		std::cout << "== generate sample points ==" << std::endl;
 		MOPS::SamplingSettings* sampling_conf = new MOPS::SamplingSettings();
-		sampling_conf->setSampleRange(vec2i(31, 31));
-		sampling_conf->setGeoBox(vec2(35.0, 45.0),  vec2(-90.0, -15.0));
+		sampling_conf->setSampleRange(vec2i{31, 31});
+		sampling_conf->setGeoBox(vec2{35.0, 45.0},  vec2{-90.0, -15.0});
 		sampling_conf->atCellCenter(false);
 		sampling_conf->setDepth(fixed_depth);
 		MOPS::MOPS_GenerateSamplePoints(sampling_conf, sample_points);

@@ -9,7 +9,7 @@
 #include "Core/MPASOGrid.h"
 #include "Core/MPASOSolution.h"
 #include "Core/MOPSApp.h"
-#include "SYCL/ImageBuffer.hpp"
+#include "Common/ImageBuffer.hpp"
 #include "Utils/GeoConverter.hpp" 
 
 
@@ -103,7 +103,7 @@ PYBIND11_MODULE(pyMOPS, m) {
             std::vector<vec3> vec;
             auto buf = arr.unchecked<2>();
             for (ssize_t i = 0; i < buf.shape(0); ++i) {
-                vec.emplace_back(buf(i, 0), buf(i, 1), buf(i, 2));
+                vec.push_back(vec3{buf(i, 0), buf(i, 1), buf(i, 2)});
             }
             self.setGridAttributesVec3(type, vec);
         })
@@ -113,7 +113,7 @@ PYBIND11_MODULE(pyMOPS, m) {
             std::vector<vec2> vec;
             auto buf = arr.unchecked<2>();
             for (ssize_t i = 0; i < buf.shape(0); ++i) {
-                vec.emplace_back(buf(i, 0), buf(i, 1));
+                vec.push_back(vec2{buf(i, 0), buf(i, 1)});
             }
             self.setGridAttributesVec2(type, vec);
         })
@@ -153,7 +153,7 @@ PYBIND11_MODULE(pyMOPS, m) {
             std::vector<vec3> vec;
             auto buf = arr.unchecked<2>();
             for (ssize_t i = 0; i < buf.shape(0); ++i) {
-                vec.emplace_back(buf(i, 0), buf(i, 1), buf(i, 2));
+                vec.push_back(vec3{buf(i, 0), buf(i, 1), buf(i, 2)});
             }
             self.setAttributesVec3(type, vec);
         })
@@ -179,7 +179,7 @@ PYBIND11_MODULE(pyMOPS, m) {
             },
             [](MOPS::VisualizationSettings& self, py::tuple t) {
                 if (t.size() != 2) throw std::runtime_error("imageSize must be a tuple of size 2");
-                self.imageSize = sycl::double2(t[0].cast<double>(), t[1].cast<double>());
+                self.imageSize = vec2{t[0].cast<double>(), t[1].cast<double>()};
             }
         )
         .def_property("LatRange",
@@ -188,7 +188,7 @@ PYBIND11_MODULE(pyMOPS, m) {
             },
             [](MOPS::VisualizationSettings& self, py::tuple t) {
                 if (t.size() != 2) throw std::runtime_error("LatRange must be a tuple of size 2");
-                self.LatRange = sycl::double2(t[0].cast<double>(), t[1].cast<double>());
+                self.LatRange = vec2{t[0].cast<double>(), t[1].cast<double>()};
             }
         )
         .def_property("LonRange",
@@ -197,7 +197,7 @@ PYBIND11_MODULE(pyMOPS, m) {
             },
             [](MOPS::VisualizationSettings& self, py::tuple t) {
                 if (t.size() != 2) throw std::runtime_error("LonRange must be a tuple of size 2");
-                self.LonRange = sycl::double2(t[0].cast<double>(), t[1].cast<double>());
+                self.LonRange = vec2{t[0].cast<double>(), t[1].cast<double>()};
             }
         )
         .def_readwrite("FixedDepth", &MOPS::VisualizationSettings::FixedDepth)
@@ -205,7 +205,7 @@ PYBIND11_MODULE(pyMOPS, m) {
         .def_readwrite("CalcType", &MOPS::VisualizationSettings::CalcType)
         .def_readwrite("VisType", &MOPS::VisualizationSettings::VisType)
         .def_readwrite("PositionType", &MOPS::VisualizationSettings::PositionType)
-        .def_readwrite("SaveType", &MOPS::VisualizationSettings::SaveType);
+        .def_readwrite("SaveType", &MOPS::VisualizationSettings::saveType);
 
 
     
@@ -216,15 +216,15 @@ PYBIND11_MODULE(pyMOPS, m) {
         .def(py::init<>())
         .def("setSeedsRange", [](MOPS::SamplingSettings& self, py::tuple t) {
             if (t.size() != 2) throw std::runtime_error("sampleRange must be a tuple of size 2");
-            self.setSampleRange(sycl::int2(t[0].cast<int>(), t[1].cast<int>()));
+            self.setSampleRange(vec2i{t[0].cast<int>(), t[1].cast<int>()});
         })
         .def("setGeoBox", [](MOPS::SamplingSettings& self, py::tuple lat, py::tuple lon) {
             if (lat.size() != 2 || lon.size() != 2)
                 throw std::runtime_error("setGeoBox expects two tuples of size 2");
 
             self.setGeoBox(
-                sycl::double2(lat[0].cast<double>(), lat[1].cast<double>()),
-                sycl::double2(lon[0].cast<double>(), lon[1].cast<double>())
+                vec2{lat[0].cast<double>(), lat[1].cast<double>()},
+                vec2{lon[0].cast<double>(), lon[1].cast<double>()}
             );
         })
         .def("setDepth", &MOPS::SamplingSettings::setDepth)
@@ -254,7 +254,9 @@ PYBIND11_MODULE(pyMOPS, m) {
     
     py::class_<CartesianCoord>(m, "CartesianCoord")
         .def(py::init<>())
-        .def(py::init<double, double, double>())
+        .def(py::init([](double x, double y, double z) {
+            return CartesianCoord{x, y, z};
+        }))
         .def("x", [](const CartesianCoord& self) { return self.x(); })
         .def("y", [](const CartesianCoord& self) { return self.y(); })
         .def("z", [](const CartesianCoord& self) { return self.z(); })
@@ -313,7 +315,7 @@ PYBIND11_MODULE(pyMOPS, m) {
             std::vector<CartesianCoord> sample_points_vec;
             auto r = sample_points_np.unchecked<2>(); 
             for (ssize_t i = 0; i < r.shape(0); ++i) {
-                sample_points_vec.emplace_back(r(i, 0), r(i, 1), r(i, 2));
+                sample_points_vec.push_back(CartesianCoord{r(i, 0), r(i, 1), r(i, 2)});
             }
 
             auto traj_lines = MOPS::MOPS_RunStreamLine(config, sample_points_vec);
@@ -370,7 +372,7 @@ PYBIND11_MODULE(pyMOPS, m) {
             std::vector<CartesianCoord> sample_points_vec;
             auto r = sample_points_np.unchecked<2>(); 
             for (ssize_t i = 0; i < r.shape(0); ++i) {
-                sample_points_vec.emplace_back(r(i, 0), r(i, 1), r(i, 2));
+                sample_points_vec.push_back(CartesianCoord{r(i, 0), r(i, 1), r(i, 2)});
             }
 
             auto traj_lines = MOPS::MOPS_RunPathLine(config, sample_points_vec);
@@ -406,7 +408,7 @@ PYBIND11_MODULE(pyMOPS, m) {
                     S(i) = ln.salinity[i];
                 }
 
-                py::array_t<double> last_pt({(py::ssize_t)3});
+                py::array_t<double> last_pt(3);
                 {
                     auto L = last_pt.mutable_unchecked<1>();
                     L(0) = ln.lastPoint.x();

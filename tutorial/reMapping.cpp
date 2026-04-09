@@ -5,7 +5,7 @@
 #include "Utils/YamlGen.hpp"
 #include "IO/VTKFileManager.hpp"
 #include "IO/MPASOReader.h"
-#include "SYCL/ImageBuffer.hpp"
+#include "Common/ImageBuffer.hpp"
 #include <string>
 
 float fixed_depth = 10.0;
@@ -14,16 +14,16 @@ void tutoral_reMapping(float fixed_depth)
 {
 	constexpr int width = 3601; constexpr int height = 1801;
 	MOPS::VisualizationSettings* config = new MOPS::VisualizationSettings();
-	config->imageSize = vec2(width, height);
-	config->LatRange = vec2(-90.0, 90.0);
-	config->LonRange = vec2(-180.0, 180.0);
+	config->imageSize = vec2{static_cast<double>(width), static_cast<double>(height)};
+	config->LatRange = vec2{-90.0, 90.0};
+	config->LonRange = vec2{-180.0, 180.0};
 	config->FixedDepth = fixed_depth;
 	config->TimeStep = 0;
 	
 #if MOPS_VTK
-	config->SaveType = MOPS::SaveType::kVTI;
+	config->saveType = MOPS::SaveType::kVTI;
 #else
-	config->SaveType = MOPS::SaveType::kPNG;
+	config->saveType = MOPS::SaveType::kPNG;
 #endif
 	
 	auto img_vec = MOPS::MOPS_RunRemapping(config);
@@ -40,13 +40,13 @@ void tutoral_reMapping(float fixed_depth)
 		};
 #endif
 
-	if (config->SaveType == MOPS::SaveType::kVTI)
+	if (config->saveType == MOPS::SaveType::kVTI)
 	{
 		#if MOPS_VTK
 		MOPS::VTKFileManager::SaveVTI(img_vec, config, names, str);
 		#endif
 	}
-	else if (config->SaveType == MOPS::SaveType::kPNG)
+	else if (config->saveType == MOPS::SaveType::kPNG)
 	{
 		for (int i = 0; i < img_vec.size(); ++i)
 		{
@@ -86,7 +86,11 @@ void IO()
 	
 	mpasoGrid->initGrid(MOPS::MPASOReader::readGridData(yaml_path).get());
 
-    MOPS::MOPS_Init("gpu");
+	#if defined(MOPS_USE_TBB) && (MOPS_USE_TBB == 1)
+	MOPS::MOPS_Init("cpu");
+	#else
+	MOPS::MOPS_Init("gpu");
+	#endif
 
 	MOPS::MOPS_Begin();
     MOPS::MOPS_AddGridMesh(mpasoGrid);

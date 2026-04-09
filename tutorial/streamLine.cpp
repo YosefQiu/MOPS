@@ -5,7 +5,7 @@
 #include "Utils/YamlGen.hpp"
 #include "IO/VTKFileManager.hpp"
 #include "IO/MPASOReader.h"
-#include "SYCL/ImageBuffer.hpp"
+#include "Common/ImageBuffer.hpp"
 #include <string>
 
 float fixed_depth = 10.0;
@@ -15,8 +15,8 @@ void tutoral_streamLine(const std::string name_prefix, float fixed_depth, MOPS_I
 	std::vector<CartesianCoord> sample_points; 
 	std::cout << "== generate sample points ==" << std::endl;
 	MOPS::SamplingSettings* sampling_conf = new MOPS::SamplingSettings();
-	sampling_conf->setSampleRange(vec2i(2, 2));
-	sampling_conf->setGeoBox(vec2(35.0, 45.0),  vec2(-60.0, -15.0));
+	sampling_conf->setSampleRange(vec2i{2, 2});
+	sampling_conf->setGeoBox(vec2{35.0, 45.0},  vec2{-60.0, -15.0});
 	sampling_conf->atCellCenter(false);
 	sampling_conf->setDepth(fixed_depth);
 	MOPS::MOPS_GenerateSamplePoints(sampling_conf, sample_points);
@@ -74,7 +74,11 @@ void IO()
 	
 	mpasoGrid->initGrid(MOPS::MPASOReader::readGridData(yaml_path).get());
 
-    MOPS::MOPS_Init("gpu");
+	#if defined(MOPS_USE_TBB) && (MOPS_USE_TBB == 1)
+	MOPS::MOPS_Init("cpu");
+	#else
+	MOPS::MOPS_Init("gpu");
+	#endif
 
 	MOPS::MOPS_Begin();
     MOPS::MOPS_AddGridMesh(mpasoGrid);

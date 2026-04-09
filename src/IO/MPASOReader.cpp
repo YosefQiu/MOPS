@@ -330,7 +330,7 @@ void MPASOReader::copyFromNdarray_Vec2(ftk::ndarray_group* g, std::string xValue
         vec.resize(Lat_vec.size());
         for (auto i = 0; i < Lat_vec.size(); i++)
         {
-            vec[i] = vec2(Lat_vec[i], Lon_vec[i]);
+            vec[i] = vec2{Lat_vec[i], Lon_vec[i]};
         }
         Debug("[Ndarray]::loading %-30s = \t [ %-8d ] \t type = [ %-10s %-10s ]", 
             name.c_str(),
@@ -353,7 +353,7 @@ void MPASOReader::copyFromNdarray_Vec3(ftk::ndarray_group* g, std::string xValue
         vec.resize(xEdge_vec.size());
         for (auto i = 0; i < xEdge_vec.size(); i++)
         {
-           vec[i] = vec3(xEdge_vec[i], yEdge_vec[i], zEdge_vec[i]);
+           vec[i] = vec3{xEdge_vec[i], yEdge_vec[i], zEdge_vec[i]};
         }
         // std::cout << "Inside function, cellCoord_vec size: " << vec.size() << " at address: " << &vec << std::endl;
         // Debug("[Ndarray]::loading %s = \t [ %d ] \t type = [ %s %s %s]", 

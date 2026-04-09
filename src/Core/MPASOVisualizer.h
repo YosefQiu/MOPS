@@ -1,8 +1,10 @@
 #pragma once
 #include "ggl.h"
-#include "SYCL/ImageBuffer.hpp"
+#include "Common/ImageBuffer.hpp"
 #include "Utils/GeoConverter.hpp"
 #include "Core/MPASOField.h"
+#include "Core/GPUContext.h"
+#include "Core/RuntimeContext.h"
 #include <vector>
 
 namespace MOPS
@@ -33,7 +35,7 @@ namespace MOPS
         CalcAttributeType CalcType = CalcAttributeType::kZonalMerimoal;
         CalcPositionType PositionType = CalcPositionType::kPoint;
         VisualizeType VisType = VisualizeType::kFixedDepth;
-        SaveType SaveType = SaveType::kNone;
+        SaveType saveType = SaveType::kNone;
         double TimeStep;
         VisualizationSettings() = default;
 
@@ -107,6 +109,20 @@ namespace MOPS
         static void VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSettings* config, std::vector<ImageBuffer<double>>& img_vec, sycl::queue& sycl_Q);
         static void VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, sycl::queue& sycl_Q);
         static void VisualizeFixedLatitude(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, sycl::queue& sycl_Q);
+
+        // Runtime-neutral overloads.
+        static void VisualizeFixedLayer(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, const RuntimeContext& ctx);
+        static void VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSettings* config, std::vector<ImageBuffer<double>>& img_vec, const RuntimeContext& ctx);
+        static void VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, const RuntimeContext& ctx);
+        static void VisualizeFixedLatitude(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, const RuntimeContext& ctx);
+        static std::vector<TrajectoryLine> StreamLine(MPASOField* mpasoF, std::vector<CartesianCoord>& points, TrajectorySettings* config, std::vector<int>& default_cell_id, const RuntimeContext& ctx);
+        static std::vector<TrajectoryLine> PathLine(MPASOField* mpasoF, std::vector<CartesianCoord>& points, TrajectorySettings* config, std::vector<int>& default_cell_id, const RuntimeContext& ctx);
+
+        // Compatibility overloads.
+        static void VisualizeFixedLayer(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, const GPUContext& ctx);
+        static void VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSettings* config, std::vector<ImageBuffer<double>>& img_vec, const GPUContext& ctx);
+        static void VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, const GPUContext& ctx);
+        static void VisualizeFixedLatitude(MPASOField* mpasoF, VisualizationSettings* config, ImageBuffer<double>* img, const GPUContext& ctx);
         static void GenerateSamplePoint(std::vector<CartesianCoord>& points, SamplingSettings* config);
         static void GenerateGaussianSpherePoints(std::vector<CartesianCoord>& points, SamplingSettings* config, int numPoints, double meanLat, double meanLon, double stdDev);
         static void GenerateSamplePointAtCenter(std::vector<CartesianCoord>& points, SamplingSettings* config);
@@ -114,6 +130,9 @@ namespace MOPS
         
         static std::vector<TrajectoryLine> StreamLine(MPASOField* mpasoF, std::vector<CartesianCoord>& points, TrajectorySettings* config, std::vector<int>& default_cell_id, sycl::queue& sycl_Q);
         static std::vector<TrajectoryLine> PathLine(MPASOField* mpasoF, std::vector<CartesianCoord>& points, TrajectorySettings* config, std::vector<int>& default_cell_id, sycl::queue& sycl_Q);
+
+        static std::vector<TrajectoryLine> StreamLine(MPASOField* mpasoF, std::vector<CartesianCoord>& points, TrajectorySettings* config, std::vector<int>& default_cell_id, const GPUContext& ctx);
+        static std::vector<TrajectoryLine> PathLine(MPASOField* mpasoF, std::vector<CartesianCoord>& points, TrajectorySettings* config, std::vector<int>& default_cell_id, const GPUContext& ctx);
 
 
 

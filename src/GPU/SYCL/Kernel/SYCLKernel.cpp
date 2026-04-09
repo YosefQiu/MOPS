@@ -1,4 +1,4 @@
-#include "SYCL/SYCLKernel.h"
+#include "GPU/SYCL/Kernel/SYCLKernel.h"
 
 using namespace MOPS;
 
@@ -67,8 +67,8 @@ bool SYCLKernel::IsInMesh(int cell_id, int max_edge, vec3 current_position,
         auto A = acc_vertexCoord_buf[A_idx];
         auto B = acc_vertexCoord_buf[B_idx];
         
-        vec3 surface_normal = YOSEF_CROSS(A, B);
-        double direction = YOSEF_DOT(surface_normal, current_position);
+        vec3 surface_normal = MOPS_CROSS(A, B);
+        double direction = MOPS_DOT(surface_normal, current_position);
         
         if (direction < 0) return false;
     }
@@ -186,7 +186,7 @@ vec3 SYCLKernel::CalcPositionAfterRotation(const vec3& position, const vec3& axi
     double sinTheta = sycl::sin(thetaRad);
 
     // normalize
-    double tmp_length = YOSEF_LENGTH(axis);
+    double tmp_length = MOPS_LENGTH(axis);
     vec3 u;
     u.x() = axis.x() / tmp_length;
     u.y() = axis.y() / tmp_length;

@@ -1,6 +1,6 @@
 ﻿#pragma once
 #include "ggl.h"
-#include "SYCL/ImageBuffer.hpp"
+#include "Common/ImageBuffer.hpp"
 #include "Core/MPASOVisualizer.h"
 #include "Utils/Utils.hpp"
 #include "Utils/GeoConverter.hpp"
@@ -16,6 +16,7 @@ namespace MOPS
 		case VisualizeType::kFixedLayer: return "fixed_layer_"; break;
 		case VisualizeType::kFixedDepth: return "fixed_depth_"; break;
 		}
+		return "unknown_";
 	}
 
 	class VTKFileManager

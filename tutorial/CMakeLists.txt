@@ -12,13 +12,15 @@ foreach(TUTORIAL_SRC ${TUTORIAL_SOURCES})
 
     target_link_libraries(${TUTORIAL_NAME} PRIVATE MOPS)
 
-    target_compile_options(${TUTORIAL_NAME} PRIVATE
+    if (MOPS_BACKEND STREQUAL "SYCL")
+      target_compile_options(${TUTORIAL_NAME} PRIVATE
         -fsycl -Wdeprecated-declarations -fsycl-targets=nvptx64-nvidia-cuda
-    )
-    
-    target_link_options(${TUTORIAL_NAME} PRIVATE
+      )
+
+      target_link_options(${TUTORIAL_NAME} PRIVATE
         -pthread -fsycl -fsycl-targets=nvptx64-nvidia-cuda -Wdeprecated-declarations
-    )
+      )
+    endif()
     
     if (MOPS_VTK)
       vtk_module_autoinit(

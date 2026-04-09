@@ -1,13 +1,39 @@
 #include "Core/MOPSApp.h"
+#include "Core/CPUContext.h"
+#include "Core/GPUContext.h"
+#include "Core/RuntimeContext.h"
 #include "Utils/Timer.hpp"
 #include <vector>
 #include "version.h"
 
-
 namespace MOPS
 {
+namespace {
+RuntimeContext CreateRuntimeContext(sycl::queue& q)
+{
+#if defined(MOPS_USE_CPU) && (MOPS_USE_CPU == 1)
+    (void)q;
+    CPUContext cpu_ctx;
+    cpu_ctx.backend = CPUBackend::kTBB;
+    return RuntimeContext::FromCPU(cpu_ctx);
+#elif defined(MOPS_USE_SYCL) && (MOPS_USE_SYCL == 1)
+    return RuntimeContext::FromGPU(GPUContext::FromSYCL(q));
+#elif defined(MOPS_USE_HIP) && (MOPS_USE_HIP == 1)
+	(void)q;
+	return RuntimeContext::FromGPU(GPUContext::FromHIP(nullptr));
+#elif defined(MOPS_USE_CUDA) && (MOPS_USE_CUDA == 1)
+    (void)q;
+    return RuntimeContext::FromGPU(GPUContext::FromCUDA(nullptr));
+#else
+    (void)q;
+    return RuntimeContext{};
+#endif
+}
+} // namespace
+
     void MOPSApp::init(const char* device)
     {
+		#if defined(MOPS_USE_SYCL) && (MOPS_USE_SYCL == 1)
 		if (strcmp(device, "gpu") == 0)
         	mSYCLQueue = sycl::queue(sycl::gpu_selector_v);
 		else if (strcmp(device, "cpu") == 0)
@@ -16,6 +42,19 @@ namespace MOPS
         std::cout << "Device selected : " << mSYCLQueue.get_device().get_info<sycl::info::device::name>() << "\n";
         std::cout << "Device vendor   : " << mSYCLQueue.get_device().get_info<sycl::info::device::vendor>() << "\n";
         std::cout << "Device version  : " << mSYCLQueue.get_device().get_info<sycl::info::device::version>() << "\n";
+		#else
+		(void)device;
+		std::cout << " [ system information ]\n";
+		#if defined(MOPS_USE_CPU) && (MOPS_USE_CPU == 1)
+		std::cout << "Device selected : CPU backend (TBB)\n";
+		#elif defined(MOPS_USE_HIP) && (MOPS_USE_HIP == 1)
+		std::cout << "Device selected : HIP backend (compiled via CUDA/NVCC toolchain)\n";
+		#elif defined(MOPS_USE_CUDA) && (MOPS_USE_CUDA == 1)
+		std::cout << "Device selected : CUDA backend (runtime queue handled by CUDA implementation)\n";
+		#else
+		std::cout << "Device selected : Unknown backend\n";
+		#endif
+		#endif
 
 		std::cout << "MOPS Version    : " << MOPS_VERSION << "\n";
 
@@ -60,29 +99,33 @@ namespace MOPS
 
 		if (mpasoSol->cellVertexZTop_vec.size() == 0)
 		{
+			RuntimeContext runtime_ctx = CreateRuntimeContext(mSYCLQueue);
 			Debug("[MOPSApp]::Run calcCellCenterZtop");
 			mpasoSol->calcCellCenterZtop();
 			Debug("[MOPSApp]::Run calcCellVertexZtop");
-			mpasoSol->calcCellVertexZtop(mpasoGrid.get(), mDataDir, mSYCLQueue);
+			mpasoSol->calcCellVertexZtop(mpasoGrid.get(), mDataDir, runtime_ctx);
 		}
 		if (mpasoSol->cellVertexZonalVelocity_vec.size() == 0 && mpasoSol->cellVertexMeridionalVelocity_vec.size() == 0
 			&& mpasoSol->cellVertexVelocity_vec.size() == 0)
 		{
+			RuntimeContext runtime_ctx = CreateRuntimeContext(mSYCLQueue);
 			Debug("[MOPSApp]::Run calcCellCenterVelocity");
-			mpasoSol->calcCellCenterVelocityByZM(mpasoGrid.get(), mDataDir, mSYCLQueue);
+			mpasoSol->calcCellCenterVelocityByZM(mpasoGrid.get(), mDataDir, runtime_ctx);
 			Debug("[MOPSApp]::Run calcCellVertexVelocity");
-			mpasoSol->calcCellVertexVelocity(mpasoGrid.get(), mDataDir, mSYCLQueue);
+			mpasoSol->calcCellVertexVelocity(mpasoGrid.get(), mDataDir, runtime_ctx);
 		}
 		if (mpasoSol->cellVertexVertVelocity_vec.size() == 0)
 		{
+			RuntimeContext runtime_ctx = CreateRuntimeContext(mSYCLQueue);
 			Debug("[MOPSApp]::Run calcCellVertexVertVelocity");
-			mpasoSol->calcCellVertexVertVelocity(mpasoGrid.get(), mDataDir, mSYCLQueue);
+			mpasoSol->calcCellVertexVertVelocity(mpasoGrid.get(), mDataDir, runtime_ctx);
 		}
 		
+		RuntimeContext runtime_ctx = CreateRuntimeContext(mSYCLQueue);
 		for (const auto& [name, vec] : mpasoSol->mDoubleAttributes)
 		{
 			Debug("[MOPSApp]::Run calcCellCenterToVertex for %s", name.c_str());
-			mpasoSol->calcCellCenterToVertex(name, vec, mpasoGrid.get(), mDataDir, mSYCLQueue);
+			mpasoSol->calcCellCenterToVertex(name, vec, mpasoGrid.get(), mDataDir, runtime_ctx);
 			Debug("[MOPSApp]::Finished loading sol information at timestep %d", mpasoSol->mTimesteps);
 		}
 
@@ -145,7 +188,8 @@ namespace MOPS
 		
 		// remapping
 		Debug("[MOPSApp]::Run remapping");
-		MPASOVisualizer::VisualizeFixedDepth(mpasoField.get(), config, img_vec, mSYCLQueue);
+		RuntimeContext runtime_ctx = CreateRuntimeContext(mSYCLQueue);
+		MPASOVisualizer::VisualizeFixedDepth(mpasoField.get(), config, img_vec, runtime_ctx);
 		Debug("[MOPSApp]::Remapping done");
 
 		return img_vec;
@@ -181,11 +225,12 @@ namespace MOPS
 		// test
 		auto test_cell_id = cell_id_vec[0];
 		auto test_cell_surface_vel = mpasoField->mSol_Front->cellCenterVelocity_vec[mpasoField->mSol_Front->mVertLevels * test_cell_id + 0];
-		auto vel_length = YOSEF_LENGTH(test_cell_surface_vel);
+		auto vel_length = MOPS_LENGTH(test_cell_surface_vel);
 		Debug("[MOPSApp]::test_cell_id = %d, test_cell_surface_vel = (%.6f, %.6f, %.6f), length = %.6f", 
 			test_cell_id, test_cell_surface_vel.x(), test_cell_surface_vel.y(), test_cell_surface_vel.z(), vel_length);
 		
-		auto lines = MPASOVisualizer::StreamLine(mpasoField.get(), sample_points, config, cell_id_vec, mSYCLQueue);
+		RuntimeContext runtime_ctx = CreateRuntimeContext(mSYCLQueue);
+		auto lines = MPASOVisualizer::StreamLine(mpasoField.get(), sample_points, config, cell_id_vec, runtime_ctx);
 		Debug("[MOPSApp]::StreamLine done");
 		
 		MOPS_TIMER_STOP("GPUKernel::StreamLine");
@@ -220,7 +265,8 @@ namespace MOPS
 		std::vector<int> cell_id_vec;
 		mpasoField->calcInWhichCells(sample_points, cell_id_vec);
 		
-		auto lines_i = MPASOVisualizer::PathLine(mpasoField.get(), sample_points, config, cell_id_vec, mSYCLQueue);
+		RuntimeContext runtime_ctx = CreateRuntimeContext(mSYCLQueue);
+		auto lines_i = MPASOVisualizer::PathLine(mpasoField.get(), sample_points, config, cell_id_vec, runtime_ctx);
 		Debug("[MOPSApp]::PathLine done [%s to %s]", solFront->getTimeStamp().c_str(), solBack->getTimeStamp().c_str());
 
 		// update sample_points
@@ -246,7 +292,8 @@ namespace MOPS
 
 			std::vector<int> cell_id_vec;
 			mpasoField->calcInWhichCells(sample_points, cell_id_vec);
-			auto lines_i = MPASOVisualizer::PathLine(mpasoField.get(), sample_points, config, cell_id_vec, mSYCLQueue);
+			RuntimeContext runtime_ctx = CreateRuntimeContext(mSYCLQueue);
+			auto lines_i = MPASOVisualizer::PathLine(mpasoField.get(), sample_points, config, cell_id_vec, runtime_ctx);
 			std:: cout << " ==== [\u2713] done... [ " 
 			<< timestep_vec[idx] << " to " << timestep_vec[idx + 1] << " ]" << std::endl;
 

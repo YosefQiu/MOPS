@@ -291,8 +291,9 @@ void MPASOGrid::searchKDT(const CartesianCoord& point, int& cell_id)
 
     // Query point:
     std::vector<double> query_pt(dim);
-    for (size_t d = 0; d < dim; d++)
-        query_pt[d] = point[d];
+    query_pt[0] = point.x();
+    query_pt[1] = point.y();
+    query_pt[2] = point.z();
 
     // do a knn search
     const size_t        num_results = 1;
@@ -386,7 +387,7 @@ void MPASOGrid::copyFromNdarray_Vec2(ftk::ndarray_group* g, std::string xValue, 
         vec.resize(Lat_vec.size());
         for (auto i = 0; i < Lat_vec.size(); i++)
         {
-            vec[i] = vec2(Lat_vec[i], Lon_vec[i]);
+            vec[i] = vec2{Lat_vec[i], Lon_vec[i]};
         }
         Debug("[Ndarray]::loading %-30s = \t [ %-8d ] \t type = [ %-10s %-10s ]", 
             name.c_str(),
@@ -409,7 +410,7 @@ void MPASOGrid::copyFromNdarray_Vec3(ftk::ndarray_group* g, std::string xValue, 
         vec.resize(xEdge_vec.size());
         for (auto i = 0; i < xEdge_vec.size(); i++)
         {
-           vec[i] = vec3(xEdge_vec[i], yEdge_vec[i], zEdge_vec[i]);
+           vec[i] = vec3{xEdge_vec[i], yEdge_vec[i], zEdge_vec[i]};
         }
         // std::cout << "Inside function, cellCoord_vec size: " << vec.size() << " at address: " << &vec << std::endl;
         // Debug("[Ndarray]::loading %s = \t [ %d ] \t type = [ %s %s %s]", 

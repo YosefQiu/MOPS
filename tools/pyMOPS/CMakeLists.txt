@@ -14,8 +14,10 @@ target_include_directories(pyMOPS PRIVATE
 
 target_link_libraries(pyMOPS PRIVATE MOPS ${Python3_LIBRARIES})
 
-target_compile_options(pyMOPS PRIVATE -fsycl -fsycl-targets=nvptx64-nvidia-cuda)
-target_link_options(pyMOPS PRIVATE -fsycl -fsycl-targets=nvptx64-nvidia-cuda)
+if (MOPS_BACKEND STREQUAL "SYCL")
+    target_compile_options(pyMOPS PRIVATE -fsycl -fsycl-targets=nvptx64-nvidia-cuda)
+    target_link_options(pyMOPS PRIVATE -fsycl -fsycl-targets=nvptx64-nvidia-cuda)
+endif()
 
 set_target_properties(pyMOPS PROPERTIES PREFIX "" SUFFIX ".so")
 set_target_properties(pyMOPS PROPERTIES

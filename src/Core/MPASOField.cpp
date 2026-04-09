@@ -54,12 +54,12 @@ bool MPASOField::isOnOcean(const vec3& position, int& cell_id, std::vector<size_
         auto B_idx = current_cell_vertices_idx[(k + 1) % current_cell_vertices_idx.size()];
         auto A = mGrid->vertexCoord_vec[A_idx];
         auto B = mGrid->vertexCoord_vec[B_idx];
-        vec3 O(0.0, 0.0, 0.0);
+        vec3 O{0.0, 0.0, 0.0};
         auto AO = O - A;
         auto BO = O - B;
         auto A_point = position - A;
-        vec3 surface_normal = YOSEF_CROSS(AO, BO);
-        double direction = YOSEF_DOT(surface_normal, A_point);
+        vec3 surface_normal = MOPS_CROSS(AO, BO);
+        double direction = MOPS_DOT(surface_normal, A_point);
         normalsConsistency.push_back(direction);
     }
 

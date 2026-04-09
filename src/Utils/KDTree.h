@@ -74,7 +74,10 @@ namespace MOPS
 
         inline num_t kdtree_get_pt(const size_t idx, const size_t dim) const
         {
-            return m_data[idx][dim];
+            const auto& p = m_data[idx];
+            if (dim == 0) return static_cast<num_t>(p.x());
+            if (dim == 1) return static_cast<num_t>(p.y());
+            return static_cast<num_t>(p.z());
         }
 
         template <class BBOX>

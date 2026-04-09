@@ -1,6 +1,8 @@
 #pragma once
 #include "IO/MPASOReader.h"
 #include "Core/MPASOGrid.h"
+#include "Core/GPUContext.h"
+#include "Core/RuntimeContext.h"
 #include "ndarray/ndarray_group_stream.hh"
 namespace MOPS
 {
@@ -114,6 +116,24 @@ namespace MOPS
         void calcCellVertexVelocity(MPASOGrid* grid, std::string& dataDir, sycl::queue& q);
         void calcCellVertexVelocityByZM(MPASOGrid* grid, std::string& dataDir, sycl::queue& q);
         void calcCellVertexVertVelocity(MPASOGrid* grid, std::string& dataDir, sycl::queue& q);
+
+        // Runtime-neutral overloads.
+        void calcCellVertexZtop(MPASOGrid* grid, std::string& dataDir, const RuntimeContext& ctx);
+        void calcCellCenterToVertex(const std::string& name, const std::vector<double>& vec, MPASOGrid* grid, std::string& dataDir, const RuntimeContext& ctx);
+        void calcCellCenterVelocity(MPASOGrid* grid, std::string& dataDir, const RuntimeContext& ctx);
+        void calcCellCenterVelocityByZM(MPASOGrid* grid, std::string& dataDir, const RuntimeContext& ctx);
+        void calcCellVertexVelocity(MPASOGrid* grid, std::string& dataDir, const RuntimeContext& ctx);
+        void calcCellVertexVelocityByZM(MPASOGrid* grid, std::string& dataDir, const RuntimeContext& ctx);
+        void calcCellVertexVertVelocity(MPASOGrid* grid, std::string& dataDir, const RuntimeContext& ctx);
+
+        // Compatibility overloads.
+        void calcCellVertexZtop(MPASOGrid* grid, std::string& dataDir, const GPUContext& ctx);
+        void calcCellCenterToVertex(const std::string& name, const std::vector<double>& vec, MPASOGrid* grid, std::string& dataDir, const GPUContext& ctx);
+        void calcCellCenterVelocity(MPASOGrid* grid, std::string& dataDir, const GPUContext& ctx);
+        void calcCellCenterVelocityByZM(MPASOGrid* grid, std::string& dataDir, const GPUContext& ctx);
+        void calcCellVertexVelocity(MPASOGrid* grid, std::string& dataDir, const GPUContext& ctx);
+        void calcCellVertexVelocityByZM(MPASOGrid* grid, std::string& dataDir, const GPUContext& ctx);
+        void calcCellVertexVertVelocity(MPASOGrid* grid, std::string& dataDir, const GPUContext& ctx);
     private:
         void readFromBlock_Vec3(const std::string& filename, std::vector<vec3>& vec);    
         void readFromBlock_Double(const std::string& filename, std::vector<double>& vec);

@@ -6,7 +6,7 @@ namespace MOPS
     class GeoConverter
     {
     public:
-        static void convertPixelToLatLonToRadians(int width, int height,
+        MOPS_HOST_DEVICE static inline void convertPixelToLatLonToRadians(int width, int height,
             double minLat, double maxLat,
             double minLon, double maxLon,
             vec2& pixel, SphericalCoord& latlon_radians)
@@ -32,7 +32,7 @@ namespace MOPS
             latlon_radians.y() = latlon_radians.y() * (M_PI / 180.0);
         }
 
-        static void convertPixelToLatLonToDegrees(int width, int height,
+        MOPS_HOST_DEVICE static inline void convertPixelToLatLonToDegrees(int width, int height,
             double minLat, double maxLat,
             double minLon, double maxLon,
             vec2& pixel, SphericalCoord& latlon_degrees)
@@ -57,7 +57,7 @@ namespace MOPS
             latlon_degrees.x() = lat; latlon_degrees.y() = lon;
         }
 
-        static void convertDegreeLatLonToPixel(int width, int height,
+        MOPS_HOST_DEVICE static inline void convertDegreeLatLonToPixel(int width, int height,
             double minLat, double maxLat, double minLon, double maxLon,
             const SphericalCoord& latlon_degree, vec2& pixel)
         {
@@ -79,7 +79,7 @@ namespace MOPS
             pixel.y() = (latlon_degree.y() - minLon) / (maxLon - minLon) * static_cast<double>(width);
         }
 
-        static void convertRadianLatLonToPixel(int width, int height,
+        MOPS_HOST_DEVICE static inline void convertRadianLatLonToPixel(int width, int height,
             double minLat, double maxLat, double minLon, double maxLon,
             const SphericalCoord& latlon_radian, vec2& pixel)
         {
@@ -104,7 +104,7 @@ namespace MOPS
         }
 
 
-        static void convertRadianLatLonToXYZ(SphericalCoord& thetaPhi, CartesianCoord& position, double r = 6371010.0f)
+        MOPS_HOST_DEVICE static inline void convertRadianLatLonToXYZ(SphericalCoord& thetaPhi, CartesianCoord& position, double r = 6371010.0f)
         {
             /*
             *  convert lat lon to xyz based on the earth radius
@@ -117,14 +117,14 @@ namespace MOPS
 
             double theta = thetaPhi.x();
             double phi = thetaPhi.y();
-            double costheta = sycl::cos(theta); double cosphi = sycl::cos(phi);
-            double sintheta = sycl::sin(theta); double sinphi = sycl::sin(phi);
+            double costheta = MOPS::math::cos(theta); double cosphi = MOPS::math::cos(phi);
+            double sintheta = MOPS::math::sin(theta); double sinphi = MOPS::math::sin(phi);
             position.x() = r * costheta * cosphi;
             position.y() = r * costheta * sinphi;
             position.z() = r * sintheta;
         }
         
-        static void convertXYZToLatLonRadian(CartesianCoord& position, SphericalCoord& thetaPhi_radian)
+        MOPS_HOST_DEVICE static inline void convertXYZToLatLonRadian(CartesianCoord& position, SphericalCoord& thetaPhi_radian)
         {
 
             /*
@@ -140,16 +140,16 @@ namespace MOPS
             double x = position.x();
             double y = position.y();
             double z = position.z();
-            double r = sycl::sqrt(x * x + y * y + z * z);
+            double r = MOPS::math::sqrt(x * x + y * y + z * z);
 
-            double theta = sycl::asin(z / r);
-            double phi = sycl::atan2(y, x);
+            double theta = MOPS::math::asin(z / r);
+            double phi = MOPS::math::atan2(y, x);
 
             thetaPhi_radian.x() = theta;
             thetaPhi_radian.y() = phi;
         }
 
-        static void convertXYZToLatLonDegree(CartesianCoord& position, SphericalCoord& thetaPhi_degree)
+        MOPS_HOST_DEVICE static inline void convertXYZToLatLonDegree(CartesianCoord& position, SphericalCoord& thetaPhi_degree)
         {
             /*
             *  convert xyz to lat lon based on the earth radius
@@ -164,16 +164,16 @@ namespace MOPS
             double x = position.x();
             double y = position.y();
             double z = position.z();
-            double r = sycl::sqrt(x * x + y * y + z * z);
+            double r = MOPS::math::sqrt(x * x + y * y + z * z);
 
-            double theta = sycl::asin(z / r);
-            double phi = sycl::atan2(y, x);
+            double theta = MOPS::math::asin(z / r);
+            double phi = MOPS::math::atan2(y, x);
 
             thetaPhi_degree.x() = theta * (180.0 / M_PI);
             thetaPhi_degree.y() = phi * (180.0 / M_PI);
         }
 
-        static void convertDegreeToRadian(const SphericalCoord& degree, SphericalCoord& radian)
+        MOPS_HOST_DEVICE static inline void convertDegreeToRadian(const SphericalCoord& degree, SphericalCoord& radian)
         {
             /*
             *  Convert latitude and longitude from degrees to radians
@@ -185,7 +185,7 @@ namespace MOPS
             radian.y() = degree.y() * (M_PI / 180.0);
         }
 
-        static void convertRadianToDegree(const SphericalCoord& radian, SphericalCoord& degree)
+        MOPS_HOST_DEVICE static inline void convertRadianToDegree(const SphericalCoord& radian, SphericalCoord& degree)
         {
             /*
             *  Convert latitude and longitude from radians to degrees
@@ -197,12 +197,12 @@ namespace MOPS
             degree.y() = radian.y() * (180.0 / M_PI);
         }
 
-        static void convertXYZVelocityToENU(const CartesianCoord& xyzPoint, const vec3& xyzVel, double& Uzon, double& Umer)
+        MOPS_HOST_DEVICE static inline void convertXYZVelocityToENU(const CartesianCoord& xyzPoint, const vec3& xyzVel, double& Uzon, double& Umer)
         {
             double Rxy, Rxyz, slon, clon, slat, clat;
 
             // Test for singularities at the poles
-            if (xyzPoint[0] == 0.0 && xyzPoint[1] == 0.0) 
+            if (xyzPoint.x() == 0.0 && xyzPoint.y() == 0.0) 
             {
                 Uzon = 0.0;
                 Umer = 0.0;
@@ -210,63 +210,67 @@ namespace MOPS
             }
 
             // Compute geometric coordinate transform coefficients
-            Rxy = sycl::sqrt(xyzPoint[0] * xyzPoint[0] + xyzPoint[1] * xyzPoint[1]);
-            Rxyz = sycl::sqrt(xyzPoint[0] * xyzPoint[0] + xyzPoint[1] * xyzPoint[1] + xyzPoint[2] * xyzPoint[2]);
-            slon = xyzPoint[1] / Rxy;
-            clon = xyzPoint[0] / Rxy;
-            slat = xyzPoint[2] / Rxyz;
+            Rxy = MOPS::math::sqrt(xyzPoint.x() * xyzPoint.x() + xyzPoint.y() * xyzPoint.y());
+            Rxyz = MOPS::math::sqrt(xyzPoint.x() * xyzPoint.x() + xyzPoint.y() * xyzPoint.y() + xyzPoint.z() * xyzPoint.z());
+            slon = xyzPoint.y() / Rxy;
+            clon = xyzPoint.x() / Rxy;
+            slat = xyzPoint.z() / Rxyz;
             clat = Rxy / Rxyz;
 
             // Compute the zonal and meridional velocity fields
-            Uzon = -slon * xyzVel[0] + clon * xyzVel[1];
-            Umer = -slat * (clon * xyzVel[0] + slon * xyzVel[1]) + clat * xyzVel[2];
+            Uzon = -slon * xyzVel.x() + clon * xyzVel.y();
+            Umer = -slat * (clon * xyzVel.x() + slon * xyzVel.y()) + clat * xyzVel.z();
         }
 
-        static void convertENUVelocityToXYZ(const CartesianCoord& xyzPoint, const double& Uzon, const double& Umer, const double& Uup, vec3& xyzVel) 
+        MOPS_HOST_DEVICE static inline void convertENUVelocityToXYZ(const CartesianCoord& xyzPoint, const double& Uzon, const double& Umer, const double& Uup, vec3& xyzVel) 
         {
             double Rxy, Rxyz, slon, clon, slat, clat;
 
             // Test for singularities at the poles
-            if (xyzPoint[0] == 0.0 && xyzPoint[1] == 0.0) 
+            if (xyzPoint.x() == 0.0 && xyzPoint.y() == 0.0) 
             {
-                xyzVel[0] = 0.0;
-                xyzVel[1] = 0.0;
-                xyzVel[2] = Uup;  // Only the vertical component remains
+                xyzVel.x() = 0.0;
+                xyzVel.y() = 0.0;
+                xyzVel.z() = Uup;  // Only the vertical component remains
                 return;
             }
 
             // Compute geometric coordinate transform coefficients
-            Rxy = sycl::sqrt(xyzPoint[0] * xyzPoint[0] + xyzPoint[1] * xyzPoint[1]);
-            Rxyz = sycl::sqrt(xyzPoint[0] * xyzPoint[0] + xyzPoint[1] * xyzPoint[1] + xyzPoint[2] * xyzPoint[2]);
-            slon = xyzPoint[1] / Rxy;
-            clon = xyzPoint[0] / Rxy;
-            slat = xyzPoint[2] / Rxyz;
+            Rxy = MOPS::math::sqrt(xyzPoint.x() * xyzPoint.x() + xyzPoint.y() * xyzPoint.y());
+            Rxyz = MOPS::math::sqrt(xyzPoint.x() * xyzPoint.x() + xyzPoint.y() * xyzPoint.y() + xyzPoint.z() * xyzPoint.z());
+            slon = xyzPoint.y() / Rxy;
+            clon = xyzPoint.x() / Rxy;
+            slat = xyzPoint.z() / Rxyz;
             clat = Rxy / Rxyz;
 
             // Convert ENU to XYZ
-            xyzVel[0] = -slon * Uzon - slat * clon * Umer + clon * clat * Uup;
-            xyzVel[1] = clon * Uzon - slat * slon * Umer + slon * clat * Uup;
-            xyzVel[2] = clat * Umer + slat * Uup;
+            xyzVel.x() = -slon * Uzon - slat * clon * Umer + clon * clat * Uup;
+            xyzVel.y() = clon * Uzon - slat * slon * Umer + slon * clat * Uup;
+            xyzVel.z() = clat * Umer + slat * Uup;
         }
 
-        static void convertXYZPositionToENUUnitVectory(const CartesianCoord& xyzPoint, CartesianCoord& Uzon, CartesianCoord& Umer)
+        MOPS_HOST_DEVICE static inline void convertXYZPositionToENUUnitVectory(const CartesianCoord& xyzPoint, CartesianCoord& Uzon, CartesianCoord& Umer)
         {
             double Rxy, Rxyz, slon, clon, slat, clat;
 
             // Test for singularities at the poles
-            if (xyzPoint[0] == 0.0 && xyzPoint[1] == 0.0) 
+            if (xyzPoint.x() == 0.0 && xyzPoint.y() == 0.0) 
             {
-                Uzon = 0.0;
-                Umer = 0.0;
+                Uzon.x() = 0.0;
+                Uzon.y() = 0.0;
+                Uzon.z() = 0.0;
+                Umer.x() = 0.0;
+                Umer.y() = 0.0;
+                Umer.z() = 0.0;
                 return;
             }
 
             // Compute geometric coordinate transform coefficients
-            Rxy = sycl::sqrt(xyzPoint[0] * xyzPoint[0] + xyzPoint[1] * xyzPoint[1]);
-            Rxyz = sycl::sqrt(xyzPoint[0] * xyzPoint[0] + xyzPoint[1] * xyzPoint[1] + xyzPoint[2] * xyzPoint[2]);
-            slon = xyzPoint[1] / Rxy;
-            clon = xyzPoint[0] / Rxy;
-            slat = xyzPoint[2] / Rxyz;
+            Rxy = MOPS::math::sqrt(xyzPoint.x() * xyzPoint.x() + xyzPoint.y() * xyzPoint.y());
+            Rxyz = MOPS::math::sqrt(xyzPoint.x() * xyzPoint.x() + xyzPoint.y() * xyzPoint.y() + xyzPoint.z() * xyzPoint.z());
+            slon = xyzPoint.y() / Rxy;
+            clon = xyzPoint.x() / Rxy;
+            slat = xyzPoint.z() / Rxyz;
             clat = Rxy / Rxyz;
 
             // Compute the zonal and meridional velocity fields
@@ -287,10 +291,10 @@ namespace MOPS
         {
             double PI = 3.14159265358979323846;
             double thetaRad = theta * PI / 180.0;
-            double cosTheta = sycl::cos(thetaRad);
-            double sinTheta = sycl::sin(thetaRad);
+            double cosTheta = MOPS::math::cos(thetaRad);
+            double sinTheta = MOPS::math::sin(thetaRad);
 
-            auto len = sycl::sqrt(axis.x() * axis.x() + axis.y() * axis.y() + axis.z() * axis.z());
+            auto len = MOPS::math::sqrt(axis.x() * axis.x() + axis.y() * axis.y() + axis.z() * axis.z());
             vec3 normalized = { axis.x() / len, axis.y() / len, axis.z() / len };
 
             vec3 u = normalized;
@@ -316,16 +320,16 @@ namespace MOPS
             auto theta = thetaPhi.x();
             auto phi = thetaPhi.y();
             auto r = 6371.01 * 1000.0;
-            position.x() = r * sycl::cos(theta) * sycl::cos(phi);
-            position.y() = r * sycl::cos(theta) * sycl::sin(phi);
-            position.z() = r * sycl::sin(theta);
+            position.x() = r * MOPS::math::cos(theta) * MOPS::math::cos(phi);
+            position.y() = r * MOPS::math::cos(theta) * MOPS::math::sin(phi);
+            position.z() = r * MOPS::math::sin(theta);
         }
         static void CONVERTXYZTOLATLON(vec3& position, vec2& thetaPhi)
         {
             double x = position.x(); double y = position.y(); double z = position.z();
-            double r = sycl::sqrt(x * x + y * y + z * z);
-            double theta = sycl::asin(z / r);
-            double phi = sycl::atan2(y, x);
+            double r = MOPS::math::sqrt(x * x + y * y + z * z);
+            double theta = MOPS::math::asin(z / r);
+            double phi = MOPS::math::atan2(y, x);
             thetaPhi.x() = theta;
             thetaPhi.y() = phi;
         }

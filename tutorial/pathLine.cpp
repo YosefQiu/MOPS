@@ -93,8 +93,8 @@ void tutorial_pathLine(const std::string name_prefix, float fixed_depth, bool is
 		Debug("== generate sample points ==");
 		{
 			MOPS::SamplingSettings* sampling_conf = new MOPS::SamplingSettings();
-			sampling_conf->setSampleRange(vec2i(10, 10));
-			sampling_conf->setGeoBox(vec2(35.0, 45.0),  vec2(-60.0, -15.0));
+			sampling_conf->setSampleRange(vec2i{100, 100});
+			sampling_conf->setGeoBox(vec2{35.0, 45.0},  vec2{-60.0, -15.0});
 			sampling_conf->atCellCenter(false);
 			sampling_conf->setDepth(fixed_depth);
 			MOPS::MOPS_GenerateSamplePoints(sampling_conf, sample_points);
@@ -249,10 +249,14 @@ void IO()
     auto solFront = std::make_shared<MOPS::MPASOSolution>();
 	auto solBack = std::make_shared<MOPS::MPASOSolution>();
 
-    auto pairs = MOPS_IO::make_forward_month_pairs(15, 1, 15, 12);
+    auto pairs = MOPS_IO::make_forward_month_pairs(15, 1, 15, 3);
     
 	{
-        MOPS::MOPS_Init("gpu");
+		#if defined(MOPS_USE_TBB) && (MOPS_USE_TBB == 1)
+		MOPS::MOPS_Init("cpu");
+		#else
+		MOPS::MOPS_Init("gpu");
+		#endif
     }
 
 	// Use new MOPS timing system
