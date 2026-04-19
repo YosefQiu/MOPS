@@ -93,8 +93,8 @@ void tutorial_pathLine(const std::string name_prefix, float fixed_depth, bool is
 		Debug("== generate sample points ==");
 		{
 			MOPS::SamplingSettings* sampling_conf = new MOPS::SamplingSettings();
-			sampling_conf->setSampleRange(vec2i{100, 100});
-			sampling_conf->setGeoBox(vec2{35.0, 45.0},  vec2{-60.0, -15.0});
+			sampling_conf->setSampleRange(vec2i{400, 400});
+			sampling_conf->setGeoBox(vec2{-90.0, 90.0},  vec2{-180.0, 180.0});
 			sampling_conf->atCellCenter(false);
 			sampling_conf->setDepth(fixed_depth);
 			MOPS::MOPS_GenerateSamplePoints(sampling_conf, sample_points);
@@ -243,13 +243,13 @@ void tutorial_pathLine(const std::string name_prefix, float fixed_depth, bool is
 
 void IO()
 {
-    const char* yaml_path = "/pscratch/sd/q/qiuyf/MOPS_Tutorial/test.yaml";
+    const char* yaml_path = "/pscratch/sd/q/qiuyf/MOPS_Tutorial/test_ab_climatology.yaml";
 	int timestep = 0;
 	auto mpasoGrid = std::make_shared<MOPS::MPASOGrid>();
     auto solFront = std::make_shared<MOPS::MPASOSolution>();
 	auto solBack = std::make_shared<MOPS::MPASOSolution>();
 
-    auto pairs = MOPS_IO::make_forward_month_pairs(15, 1, 15, 3);
+    auto pairs = MOPS_IO::make_forward_month_pairs(01, 1, 03, 12);
     
 	{
 		#if defined(MOPS_USE_TBB) && (MOPS_USE_TBB == 1)

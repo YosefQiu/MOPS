@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>MOPS Pathlines - deck.gl</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0a1929;
+      color: #fff;
+    }
+
+    #container {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+    }
+
+    #info {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: rgba(10, 25, 41, 0.9);
+      padding: 15px 20px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      max-width: 300px;
+      z-index: 1;
+    }
+
+    #info h2 {
+      margin: 0 0 10px 0;
+      font-size: 18px;
+      color: #00ff88;
+    }
+
+    #info p {
+      margin: 5px 0;
+      font-size: 14px;
+      color: #aaa;
+    }
+
+    #controls {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      background: rgba(10, 25, 41, 0.9);
+      padding: 15px 20px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      z-index: 1;
+    }
+
+    #controls label {
+      display: block;
+      margin: 10px 0;
+      font-size: 14px;
+    }
+
+    #controls input[type="range"] {
+      width: 200px;
+    }
+
+    .loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 24px;
+      color: #00ff88;
+    }
+  </style>
+  <script src="https://unpkg.com/deck.gl@latest/dist.min.js"></script>
+</head>
+<body>
+  <div id="container">
+    <div class="loading">Loading MOPS Pathlines...</div>
+  </div>
+
+  <div id="info" style="display: none;">
+    <h2>MOPS Ocean Pathlines</h2>
+    <p>Particles: <strong id="particleCount">0</strong></p>
+    <p>Depth: <strong id="depthInfo">10m</strong></p>
+    <p>Region: <strong id="regionInfo">Gulf of Mexico</strong></p>
+  </div>
+
+  <div id="controls" style="display: none;">
+    <label>
+      Line Width: <span id="widthValue">2</span>
+      <input type="range" id="lineWidth" min="1" max="10" value="2">
+    </label>
+    <label>
+      Animation Speed: <span id="speedValue">1</span>
+      <input type="range" id="animSpeed" min="0" max="5" step="0.1" value="1">
+    </label>
+    <label>
+      <input type="checkbox" id="animateToggle" checked>
+      Animate Trails
+    </label>
+  </div>
+
+  <script>
+    const {DeckGL, PathLayer, ScatterplotLayer, COORDINATE_SYSTEM} = deck;
+
+    // Configuration
+    const PATHLINE_URL = '/Agent/outputs/pathline/pathlines.json';
+    let pathlineData = null;
+    let animationFrame = 0;
+    let animationSpeed = 1;
+    let animateTrails = true;
+
+    // Initialize deck.gl
+    const deckgl = new DeckGL({
+      container: 'container',
+      initialViewState: {
+        longitude: -90,
+        latitude: 25,
+        zoom: 5,
+        pitch: 0,
+        bearing: 0
+      },
+      controller: true,
+      layers: []
+    });
+
+    // Color scale for particles
+    function getParticleColor(particleId, totalParticles) {
+      const hue = (particleId / totalParticles) * 360;
+      const rgb = hslToRgb(hue / 360, 0.7, 0.6);
+      return [...rgb, 200];
+    }
+
+    function hslToRgb(h, s, l) {
+      let r, g, b;
+      if (s === 0) {
+        r = g = b = l;
+      } else {
+        const hue2rgb = (p, q, t) => {
+          if (t < 0) t += 1;
+          if (t > 1) t -= 1;
+          if (t < 1/6) return p + (q - p) * 6 * t;
+          if (t < 1/2) return q;
+          if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+          return p;
+        };
+        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        const p = 2 * l - q;
+        r = hue2rgb(p, q, h + 1/3);
+        g = hue2rgb(p, q, h);
+        b = hue2rgb(p, q, h - 1/3);
+      }
+      return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+    }
+
+    // Update layers
+    function updateLayers(progress = 1.0) {
+      if (!pathlineData) return;
+
+      const lineWidth = parseFloat(document.getElementById('lineWidth').value);
+      const layers = [];
+
+      // Pathlines layer
+      layers.push(new PathLayer({
+        id: 'mops-pathlines',
+        data: pathlineData.particles,
+        getPath: d => {
+          const maxIdx = animateTrails
+            ? Math.floor(d.points.length * progress)
+            : d.points.length;
+          return d.points.slice(0, maxIdx).map(p => [p[1], p[0]]);  // [lon, lat]
+        },
+        getColor: d => getParticleColor(d.id, pathlineData.num_particles),
+        getWidth: lineWidth,
+        widthMinPixels: lineWidth,
+        widthScale: 1,
+        pickable: true,
+        autoHighlight: true,
+        highlightColor: [255, 255, 255, 128],
+        onHover: info => {
+          if (info.object) {
+            const particle = info.object;
+            console.log('Particle', particle.id, '- Points:', particle.points.length);
+          }
+        }
+      }));
+
+      // Start points layer
+      layers.push(new ScatterplotLayer({
+        id: 'start-points',
+        data: pathlineData.particles.filter(p => p.points.length > 0),
+        getPosition: d => [d.points[0][1], d.points[0][0]],  // [lon, lat]
+        getRadius: 5000,
+        getFillColor: [0, 255, 136, 255],
+        radiusMinPixels: 3,
+        radiusMaxPixels: 8,
+        pickable: true
+      }));
+
+      // Current positions (for animation)
+      if (animateTrails && progress < 1.0) {
+        layers.push(new ScatterplotLayer({
+          id: 'current-points',
+          data: pathlineData.particles.filter(p => p.points.length > 0),
+          getPosition: d => {
+            const idx = Math.min(
+              Math.floor(d.points.length * progress),
+              d.points.length - 1
+            );
+            return [d.points[idx][1], d.points[idx][0]];
+          },
+          getRadius: 8000,
+          getFillColor: [255, 255, 0, 255],
+          radiusMinPixels: 5,
+          radiusMaxPixels: 12
+        }));
+      }
+
+      deckgl.setProps({ layers });
+    }
+
+    // Animation loop
+    function animate() {
+      if (pathlineData && animateTrails) {
+        animationFrame += 0.01 * animationSpeed;
+        const progress = (animationFrame % 100) / 100;
+        updateLayers(progress);
+      }
+      requestAnimationFrame(animate);
+    }
+
+    // Load pathline data
+    fetch(PATHLINE_URL)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        return response.json();
+      })
+      .then(data => {
+        pathlineData = data;
+        console.log('Loaded', data.num_particles, 'particles');
+
+        // Hide loading, show info
+        document.querySelector('.loading').style.display = 'none';
+        document.getElementById('info').style.display = 'block';
+        document.getElementById('controls').style.display = 'block';
+
+        // Update info
+        document.getElementById('particleCount').textContent = data.num_particles;
+
+        // Calculate bounds for initial view
+        let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
+        data.particles.forEach(p => {
+          p.points.forEach(([lat, lon]) => {
+            minLat = Math.min(minLat, lat);
+            maxLat = Math.max(maxLat, lat);
+            minLon = Math.min(minLon, lon);
+            maxLon = Math.max(maxLon, lon);
+          });
+        });
+
+        // Set initial view
+        deckgl.setProps({
+          initialViewState: {
+            longitude: (minLon + maxLon) / 2,
+            latitude: (minLat + maxLat) / 2,
+            zoom: 6,
+            pitch: 0,
+            bearing: 0
+          }
+        });
+
+        updateLayers(1.0);
+      })
+      .catch(error => {
+        console.error('Failed to load pathlines:', error);
+        document.querySelector('.loading').textContent = `Error: ${error.message}`;
+        document.querySelector('.loading').style.color = '#ff4444';
+      });
+
+    // Controls
+    document.getElementById('lineWidth').addEventListener('input', e => {
+      document.getElementById('widthValue').textContent = e.target.value;
+      updateLayers(animateTrails ? (animationFrame % 100) / 100 : 1.0);
+    });
+
+    document.getElementById('animSpeed').addEventListener('input', e => {
+      animationSpeed = parseFloat(e.target.value);
+      document.getElementById('speedValue').textContent = e.target.value;
+    });
+
+    document.getElementById('animateToggle').addEventListener('change', e => {
+      animateTrails = e.target.checked;
+      if (!animateTrails) {
+        updateLayers(1.0);
+      }
+    });
+
+    // Start animation
+    animate();
+  </script>
+</body>
+</html>

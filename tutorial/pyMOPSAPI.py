@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 sys.path.append("../tools/pyMOPS/pyMOPS/")
 import pyMOPS
 import numpy as np
@@ -13,7 +14,9 @@ from matplotlib.collections import LineCollection
 from matplotlib.colors import Normalize
 from mpl_toolkits.mplot3d import Axes3D
 from datetime import datetime
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Iterable, Optional, Sequence
+
+
 print("Available API:", dir(pyMOPS))
 print("\n\n")
     
@@ -284,6 +287,352 @@ def Vis_PathLines(
     plt.title(title)
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.show()
+
+
+class MOPSRemapping:
+    """
+    Python wrapper for remapping, mirroring tutorial/reMapping.cpp.
+
+    Workflow:
+      1) init(device, time_stamp, time_step)
+      2) run(...)
+      3) optionally save outputs to png / npy
+    """
+
+    def __init__(self, yaml_path: str):
+        self.yaml_path = str(yaml_path)
+
+        self.grid = pyMOPS.MPASOGrid()
+        self.sol = pyMOPS.MPASOSolution()
+
+        self._device: Optional[str] = None
+        self._time_stamp: Optional[str] = None
+        self._time_step: int = 0
+        self._initialized = False
+        self._active_solution_id: Optional[int] = None
+
+    # ------------------------------------------------------------------
+    # Init / load
+    # ------------------------------------------------------------------
+    def init(
+        self,
+        device: str = "gpu",
+        time_stamp: str = "0015-01-01",
+        time_step: int = 0,
+        add_temperature: bool = True,
+        add_salinity: bool = True,
+    ):
+        """
+        Initialize runtime, load grid + one solution snapshot, and register them.
+        Mirrors tutorial/reMapping.cpp.
+
+        Parameters
+        ----------
+        device : str
+            "gpu" or "cpu"
+        time_stamp : str
+            e.g. "0015-01-01"
+        time_step : int
+            usually 0
+        add_temperature : bool
+            whether to expose temperature attribute
+        add_salinity : bool
+            whether to expose salinity attribute
+        """
+        self._device = device
+        self._time_stamp = time_stamp
+        self._time_step = int(time_step)
+
+        pyMOPS.MOPS_Init(device)
+
+        # Load grid
+        self.grid.init_from_reader(
+            pyMOPS.MPASOReader.readGridData(self.yaml_path)
+        )
+
+        # Load solution at given time stamp
+        self.sol.init_from_reader(
+            pyMOPS.MPASOReader.readSolData(
+                self.yaml_path, time_stamp, self._time_step
+            )
+        )
+
+        # Match tutorial/reMapping.cpp behavior
+        if add_temperature:
+            self.sol.add_attribute("temperature", pyMOPS.AttributeFormat.kFloat)
+        if add_salinity:
+            self.sol.add_attribute("salinity", pyMOPS.AttributeFormat.kFloat)
+
+        pyMOPS.MOPS_Begin()
+        pyMOPS.MOPS_AddGridMesh(self.grid)
+        pyMOPS.MOPS_AddAttribute(self.sol.getID(), self.sol)
+        pyMOPS.MOPS_End()
+        pyMOPS.MOPS_ActiveAttribute(self.sol.getID(), None)
+
+        self._active_solution_id = self.sol.getID()
+        self._initialized = True
+        return self
+
+    # ------------------------------------------------------------------
+    # Config builder
+    # ------------------------------------------------------------------
+    def build_config(
+        self,
+        width: int = 3601,
+        height: int = 1801,
+        lat_range: Tuple[float, float] = (-90.0, 90.0),
+        lon_range: Tuple[float, float] = (-180.0, 180.0),
+        fixed_depth: float = 10.0,
+        time_step: int = 0,
+        calc_type=None,
+        vis_type=None,
+        position_type=None,
+        save_type=None,
+    ):
+        """
+        Build VisualizationSettings for remapping.
+
+        Notes
+        -----
+        The C++ tutorial relies on defaults for CalcType / VisType / PositionType.
+        So these are optional here too. Only override them when you explicitly know
+        which enum you want.
+        """
+        cfg = pyMOPS.VisualizationSettings()
+        cfg.imageSize = (int(width), int(height))
+        cfg.LatRange = (float(lat_range[0]), float(lat_range[1]))
+        cfg.LonRange = (float(lon_range[0]), float(lon_range[1]))
+        cfg.FixedDepth = float(fixed_depth)
+        cfg.TimeStep = int(time_step)
+
+        if calc_type is not None:
+            cfg.CalcType = calc_type
+        if vis_type is not None:
+            cfg.VisType = vis_type
+        if position_type is not None:
+            cfg.PositionType = position_type
+        if save_type is not None:
+            cfg.SaveType = save_type
+
+        return cfg
+
+    # ------------------------------------------------------------------
+    # Run
+    # ------------------------------------------------------------------
+    def run(
+        self,
+        width: int = 3601,
+        height: int = 1801,
+        lat_range: Tuple[float, float] = (-90.0, 90.0),
+        lon_range: Tuple[float, float] = (-180.0, 180.0),
+        fixed_depth: float = 10.0,
+        time_step: int = 0,
+        calc_type=None,
+        vis_type=None,
+        position_type=None,
+        save_type=None,
+        return_numpy: bool = True,
+    ) -> List[np.ndarray]:
+        """
+        Execute remapping and return a list of images.
+
+        Each output image is expected to be shape (H, W, 4).
+        """
+        if not self._initialized:
+            raise RuntimeError(
+                "MOPSRemapping is not initialized. Call .init(...) first."
+            )
+
+        cfg = self.build_config(
+            width=width,
+            height=height,
+            lat_range=lat_range,
+            lon_range=lon_range,
+            fixed_depth=fixed_depth,
+            time_step=time_step,
+            calc_type=calc_type,
+            vis_type=vis_type,
+            position_type=position_type,
+            save_type=save_type,
+        )
+
+        imgs = pyMOPS.MOPS_RunRemapping(cfg)
+
+        if return_numpy:
+            return [np.asarray(img) for img in imgs]
+        return imgs
+
+    # ------------------------------------------------------------------
+    # Save helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _normalize_to_uint8(arr: np.ndarray) -> np.ndarray:
+        """
+        Normalize arbitrary float array to uint8 in [0,255].
+        NaNs/Infs are handled safely.
+        """
+        x = np.asarray(arr, dtype=np.float64)
+        x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+
+        xmin = np.min(x)
+        xmax = np.max(x)
+        if xmax <= xmin:
+            return np.zeros_like(x, dtype=np.uint8)
+
+        y = (x - xmin) / (xmax - xmin)
+        y = np.clip(y * 255.0, 0, 255)
+        return y.astype(np.uint8)
+
+    @staticmethod
+    def save_npy(images: Sequence[np.ndarray], out_dir: str, prefix: str = "remap"):
+        out = Path(out_dir)
+        out.mkdir(parents=True, exist_ok=True)
+
+        for i, img in enumerate(images):
+            np.save(out / f"{prefix}_{i}.npy", np.asarray(img))
+
+    @staticmethod
+    def save_png_channels(
+        images: Sequence[np.ndarray],
+        out_dir: str,
+        prefix: str = "output",
+        channels: Iterable[int] = (0, 1, 2),
+    ):
+        """
+        Save selected channels of each remapped image as grayscale PNGs,
+        matching the spirit of tutorial/reMapping.cpp.
+        """
+        from PIL import Image
+
+        out = Path(out_dir)
+        out.mkdir(parents=True, exist_ok=True)
+
+        for i, img in enumerate(images):
+            arr = np.asarray(img)
+            if arr.ndim != 3 or arr.shape[2] < 4:
+                raise ValueError(
+                    f"Expected image shape (H,W,4), got {arr.shape} for image {i}"
+                )
+
+            for ch in channels:
+                if ch < 0 or ch >= arr.shape[2]:
+                    raise ValueError(f"Invalid channel {ch} for image {i}")
+
+                u8 = MOPSRemapping._normalize_to_uint8(arr[:, :, ch])
+                Image.fromarray(u8, mode="L").save(out / f"{prefix}_{i}_ch{ch}.png")
+
+    @staticmethod
+    def save_colormap_png(
+        images: Sequence[np.ndarray],
+        out_dir: str,
+        prefix: str = "output",
+        channel: int = 3,
+        cmap_name: str = "viridis",
+        save_colorbar: bool = True,
+    ):
+        """
+        Save one selected channel from each remapped image as a pseudocolor PNG,
+        matching the logic of the C++ SaveToPNG:
+        - use one channel only
+        - ignore NaNs when computing min/max
+        - NaNs become transparent black
+        - normal values mapped through colormap
+        """
+        from PIL import Image
+        import matplotlib.pyplot as plt
+        import matplotlib.cm as cm
+        import matplotlib.colors as mcolors
+
+        out = Path(out_dir)
+        out.mkdir(parents=True, exist_ok=True)
+
+        import matplotlib
+        cmap = matplotlib.colormaps.get_cmap(cmap_name)
+
+        for i, img in enumerate(images):
+            arr = np.asarray(img)
+            if arr.ndim != 3:
+                raise ValueError(f"Expected image shape (H,W,C), got {arr.shape} for image {i}")
+            if channel < 0 or channel >= arr.shape[2]:
+                raise ValueError(
+                    f"Invalid channel={channel}, image {i} only has {arr.shape[2]} channels"
+                )
+
+            channel_data = np.asarray(arr[:, :, channel], dtype=np.float64)
+            h, w = channel_data.shape
+
+            valid_mask = np.isfinite(channel_data)
+            if not np.any(valid_mask):
+                # all invalid -> fully transparent black
+                rgba_u8 = np.zeros((h, w, 4), dtype=np.uint8)
+                min_val, max_val = 0.0, 1.0
+            else:
+                valid_vals = channel_data[valid_mask]
+                min_val = float(np.min(valid_vals))
+                max_val = float(np.max(valid_vals))
+                if min_val >= max_val:
+                    max_val = min_val + 1e-5
+
+                norm = np.zeros_like(channel_data, dtype=np.float64)
+                norm[valid_mask] = (channel_data[valid_mask] - min_val) / (max_val - min_val)
+                norm = np.clip(norm, 0.0, 1.0)
+
+                rgba = cmap(norm)  # float RGBA in [0,1], shape (H,W,4)
+                rgba_u8 = (rgba * 255.0).astype(np.uint8)
+
+                # NaNs -> transparent black
+                rgba_u8[~valid_mask, 0] = 0
+                rgba_u8[~valid_mask, 1] = 0
+                rgba_u8[~valid_mask, 2] = 0
+                rgba_u8[~valid_mask, 3] = 0
+
+                # valid pixels fully opaque
+                rgba_u8[valid_mask, 3] = 255
+
+            Image.fromarray(rgba_u8, mode="RGBA").save(out / f"{prefix}_{i}_ch{channel}.png")
+
+            if save_colorbar:
+                # Create vertical colorbar (changed from horizontal for frontend display)
+                fig, ax = plt.subplots(figsize=(1.5, 6))  # Narrow and tall for vertical
+                fig.subplots_adjust(left=0.5)  # Adjust left margin for vertical orientation
+
+                norm_obj = mcolors.Normalize(vmin=min_val, vmax=max_val)
+                sm = cm.ScalarMappable(norm=norm_obj, cmap=cmap)
+                sm.set_array([])
+
+                cbar = fig.colorbar(sm, cax=ax, orientation="vertical")  # Changed to vertical
+                # cbar.set_label(f"Channel {channel}")
+
+                fig.savefig(
+                    out / f"{prefix}_{i}_ch{channel}_colorbar.png",
+                    dpi=200,
+                    bbox_inches="tight",
+                    transparent=False,
+                )
+                plt.close(fig)
+
+    @staticmethod
+    def save_colormap_pngs(
+        images: Sequence[np.ndarray],
+        out_dir: str,
+        prefix: str = "output",
+        channels: Iterable[int] = (0, 1, 2, 3),
+        cmap_name: str = "coolwarm",
+        save_colorbar: bool = True,
+    ):
+        """
+        Save multiple channels, one pseudocolor PNG per channel per image.
+        """
+        for ch in channels:
+            MOPSRemapping.save_colormap_png(
+                images=images,
+                out_dir=out_dir,
+                prefix=prefix,
+                channel=ch,
+                cmap_name=cmap_name,
+                save_colorbar=save_colorbar,
+            )
+
 
 class MOPSStreamline:
     """
