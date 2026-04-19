@@ -24,7 +24,6 @@
 #include <iomanip>
 #include <chrono>
 #include <limits>
-#include <numbers>
 #include <cmath>
 #include <filesystem>
 #include <cstddef>
