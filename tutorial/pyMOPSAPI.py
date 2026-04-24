@@ -634,6 +634,255 @@ class MOPSRemapping:
             )
 
 
+class MOPSReGrid:
+    """
+    Python wrapper for regridding at fixed latitude.
+
+    This class mirrors the functionality of tutorial/reGrid.cpp, which performs
+    regridding along a fixed latitude cross-section through the ocean depth.
+
+    Workflow:
+      1) init(device, time_stamp, time_step)
+      2) run(...)
+      3) save outputs using save_to_binary() or save_to_png()
+    """
+
+    def __init__(self, yaml_path: str):
+        self.yaml_path = str(yaml_path)
+
+        self.grid = pyMOPS.MPASOGrid()
+        self.sol = pyMOPS.MPASOSolution()
+
+        self._device: Optional[str] = None
+        self._time_stamp: Optional[str] = None
+        self._time_step: int = 0
+        self._initialized = False
+        self._active_solution_id: Optional[int] = None
+
+    # ------------------------------------------------------------------
+    # Init / load
+    # ------------------------------------------------------------------
+    def init(
+        self,
+        device: str = "gpu",
+        time_stamp: str = "0015-01-01",
+        time_step: int = 0,
+        add_temperature: bool = True,
+        add_salinity: bool = True,
+    ):
+        """
+        Initialize runtime, load grid + one solution snapshot, and register them.
+
+        Parameters
+        ----------
+        device : str
+            "gpu" or "cpu"
+        time_stamp : str
+            e.g. "0015-01-01"
+        time_step : int
+            usually 0
+        add_temperature : bool
+            whether to expose temperature attribute
+        add_salinity : bool
+            whether to expose salinity attribute
+        """
+        self._device = device
+        self._time_stamp = time_stamp
+        self._time_step = int(time_step)
+
+        pyMOPS.MOPS_Init(device)
+
+        # Load grid
+        self.grid.init_from_reader(
+            pyMOPS.MPASOReader.readGridData(self.yaml_path)
+        )
+
+        # Load solution at given time stamp
+        self.sol.init_from_reader(
+            pyMOPS.MPASOReader.readSolData(
+                self.yaml_path, time_stamp, self._time_step
+            )
+        )
+
+        # Add attributes
+        if add_temperature:
+            self.sol.add_attribute("temperature", pyMOPS.AttributeFormat.kFloat)
+        if add_salinity:
+            self.sol.add_attribute("salinity", pyMOPS.AttributeFormat.kFloat)
+
+        pyMOPS.MOPS_Begin()
+        pyMOPS.MOPS_AddGridMesh(self.grid)
+        pyMOPS.MOPS_AddAttribute(self.sol.getID(), self.sol)
+        pyMOPS.MOPS_End()
+        pyMOPS.MOPS_ActiveAttribute(self.sol.getID(), None)
+
+        self._active_solution_id = self.sol.getID()
+        self._initialized = True
+        return self
+
+    # ------------------------------------------------------------------
+    # Config builder
+    # ------------------------------------------------------------------
+    def build_config(
+        self,
+        width: int = 720,
+        height: int = 100,
+        lon_range: Tuple[float, float] = (-180.0, 180.0),
+        depth_range: Tuple[float, float] = (0.0, 5000.0),
+        fixed_latitude: float = 45.0,
+        time_step: int = 0,
+    ):
+        """
+        Build VisualizationSettings for regridding at fixed latitude.
+
+        Parameters
+        ----------
+        width : int
+            Image width (longitude bins)
+        height : int
+            Image height (depth bins)
+        lon_range : Tuple[float, float]
+            Longitude range in degrees
+        depth_range : Tuple[float, float]
+            Depth range in meters (positive downward)
+        fixed_latitude : float
+            Fixed latitude in degrees
+        time_step : int
+            Time step index
+        """
+        cfg = pyMOPS.VisualizationSettings()
+        cfg.imageSize = (int(width), int(height))
+        cfg.LonRange = (float(lon_range[0]), float(lon_range[1]))
+        cfg.DepthRange = (float(depth_range[0]), float(depth_range[1]))
+        cfg.FixedLatitude = float(fixed_latitude)
+        cfg.TimeStep = int(time_step)
+        return cfg
+
+    # ------------------------------------------------------------------
+    # Run
+    # ------------------------------------------------------------------
+    def run(
+        self,
+        width: int = 720,
+        height: int = 100,
+        lon_range: Tuple[float, float] = (-180.0, 180.0),
+        depth_range: Tuple[float, float] = (0.0, 5000.0),
+        fixed_latitude: float = 45.0,
+        time_step: int = 0,
+        return_numpy: bool = True,
+    ) -> np.ndarray:
+        """
+        Execute regridding at fixed latitude and return the image.
+
+        Output image shape: (height, width, 4)
+        Channels: [E, N, Vertical, Magnitude]
+
+        Returns
+        -------
+        np.ndarray
+            Image array of shape (H, W, 4)
+        """
+        if not self._initialized:
+            raise RuntimeError(
+                "MOPSReGrid is not initialized. Call .init(...) first."
+            )
+
+        cfg = self.build_config(
+            width=width,
+            height=height,
+            lon_range=lon_range,
+            depth_range=depth_range,
+            fixed_latitude=fixed_latitude,
+            time_step=time_step,
+        )
+
+        img = pyMOPS.MOPS_RunReGrid(cfg)
+
+        if return_numpy:
+            return np.asarray(img)
+        return img
+
+    # ------------------------------------------------------------------
+    # Save helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def save_to_binary(image: np.ndarray, filename: str):
+        """
+        Save regridded image as raw binary file (.bin).
+
+        This matches the binary output format of tutorial/reGrid.cpp.
+
+        Parameters
+        ----------
+        image : np.ndarray
+            Image array of shape (H, W, 4)
+        filename : str
+            Output filename (e.g., "regrid_fixed_latitude.bin")
+        """
+        arr = np.asarray(image, dtype=np.float64)
+        arr.tofile(filename)
+        print(f"Saved raw binary file: {filename} "
+              f"({arr.shape[1]} x {arr.shape[0]} x {arr.shape[2]} channels, "
+              f"{arr.nbytes} bytes)")
+
+    @staticmethod
+    def save_to_png(
+        image: np.ndarray,
+        filename: str,
+        channel: int = 3,
+        cmap_name: str = "viridis",
+    ):
+        """
+        Save one channel of the regridded image as a PNG with colormap.
+
+        Parameters
+        ----------
+        image : np.ndarray
+            Image array of shape (H, W, 4)
+        filename : str
+            Output filename (e.g., "regrid.png")
+        channel : int
+            Which channel to save (0=E, 1=N, 2=Vertical, 3=Magnitude)
+        cmap_name : str
+            Matplotlib colormap name
+        """
+        from PIL import Image
+        import matplotlib.pyplot as plt
+        import matplotlib as mpl
+
+        arr = np.asarray(image)
+        if arr.ndim != 3 or channel >= arr.shape[2]:
+            raise ValueError(f"Invalid channel {channel} for image shape {arr.shape}")
+
+        channel_data = arr[:, :, channel]
+
+        # Handle NaNs
+        valid_mask = np.isfinite(channel_data)
+        if not np.any(valid_mask):
+            rgba_u8 = np.zeros((arr.shape[0], arr.shape[1], 4), dtype=np.uint8)
+        else:
+            valid_vals = channel_data[valid_mask]
+            min_val = float(np.min(valid_vals))
+            max_val = float(np.max(valid_vals))
+            if min_val >= max_val:
+                max_val = min_val + 1e-5
+
+            norm = np.zeros_like(channel_data, dtype=np.float64)
+            norm[valid_mask] = (channel_data[valid_mask] - min_val) / (max_val - min_val)
+            norm = np.clip(norm, 0.0, 1.0)
+
+            cmap = mpl.colormaps.get_cmap(cmap_name)
+            rgba = cmap(norm)
+            rgba_u8 = (rgba * 255.0).astype(np.uint8)
+
+            # NaNs -> transparent black
+            rgba_u8[~valid_mask, :] = 0
+            rgba_u8[valid_mask, 3] = 255
+
+        Image.fromarray(rgba_u8, mode="RGBA").save(filename)
+        print(f"Saved PNG: {filename}")
+
+
 class MOPSStreamline:
     """
     MOPSStreamline: a Python wrapper for single-timestep streamline tracing.

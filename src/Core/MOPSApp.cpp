@@ -195,7 +195,21 @@ RuntimeContext CreateRuntimeContext(sycl::queue& q)
 		return img_vec;
     }
 
-	
+	ImageBuffer<double> MOPSApp::runReGrid(VisualizationSettings* config)
+	{
+		// Create single image buffer for fixed-latitude visualization
+		ImageBuffer<double> img(config->imageSize.x(), config->imageSize.y());
+
+		// Run regridding at fixed latitude
+		Debug("[MOPSApp]::Run regridding at fixed latitude");
+		RuntimeContext runtime_ctx = CreateRuntimeContext(mSYCLQueue);
+		MPASOVisualizer::VisualizeFixedLatitude(mpasoField.get(), config, &img, runtime_ctx);
+		Debug("[MOPSApp]::Regridding done");
+
+		return img;
+	}
+
+
 	void MOPSApp::generateSamplePoints(SamplingSettings* config, std::vector<CartesianCoord>& sample_points)
 	{
 		MPASOVisualizer::GenerateSamplePoint(sample_points, config);

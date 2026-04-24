@@ -36,6 +36,7 @@ namespace MOPS
         std::vector<TrajectoryLine> runStreamLine(TrajectorySettings* config, std::vector<CartesianCoord>& sample_points);
         std::vector<TrajectoryLine> runPathLine(TrajectorySettings* config, std::vector<CartesianCoord>& sample_points);
         std::vector<ImageBuffer<double>> runRemapping(VisualizationSettings* config);
+        ImageBuffer<double> runReGrid(VisualizationSettings* config);
         void generateSamplePoints(SamplingSettings* config, std::vector<CartesianCoord>& sample_points);
         void generateSamplePointsAtCenter(SamplingSettings* config, std::vector<CartesianCoord>& sample_points);
     public:

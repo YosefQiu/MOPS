@@ -200,6 +200,16 @@ PYBIND11_MODULE(pyMOPS, m) {
                 self.LonRange = vec2{t[0].cast<double>(), t[1].cast<double>()};
             }
         )
+        .def_property("DepthRange",
+            [](const MOPS::VisualizationSettings& self) {
+                return py::make_tuple(self.DepthRange.x(), self.DepthRange.y());
+            },
+            [](MOPS::VisualizationSettings& self, py::tuple t) {
+                if (t.size() != 2) throw std::runtime_error("DepthRange must be a tuple of size 2");
+                self.DepthRange = vec2{t[0].cast<double>(), t[1].cast<double>()};
+            }
+        )
+        .def_readwrite("FixedLatitude", &MOPS::VisualizationSettings::FixedLatitude)
         .def_readwrite("FixedDepth", &MOPS::VisualizationSettings::FixedDepth)
         .def_readwrite("TimeStep", &MOPS::VisualizationSettings::TimeStep)
         .def_readwrite("CalcType", &MOPS::VisualizationSettings::CalcType)
@@ -287,6 +297,16 @@ PYBIND11_MODULE(pyMOPS, m) {
         }
         return py_images;
         });
+
+    m.def("MOPS_RunReGrid", [](MOPS::VisualizationSettings* config) {
+        auto img = MOPS::app.runReGrid(config);
+        auto h = img.getHeight();
+        auto w = img.getWidth();
+        auto data = img.mPixels.data();
+        // shape = [h, w, 4]
+        return py::array_t<double>({h, w, 4}, data);
+        },
+        "Run regridding at fixed latitude");
 
     m.def("MOPS_GenerateSeedsPoints", [](MOPS::SamplingSettings* setting) {
         std::vector<CartesianCoord> pts;
