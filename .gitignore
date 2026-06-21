@@ -31,3 +31,5 @@ tutorial/__pycache__/
 tutorial/ab_result_test/
 tutorial/pathLine_ab2.py
 tutorial/*.npy
+PATHLINE_MODIFICATIONS_CHANGELOG.md
+FILES_CHANGED.md

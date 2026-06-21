@@ -1532,6 +1532,80 @@ MOPS_DEVICE inline double CalcZTopAtLevel0CUDA(
     return ztop_surface;
 }
 
+// Helper function: Calculate zTop at bottom level (seafloor) at given position
+MOPS_DEVICE inline double CalcZTopAtBottomCUDA(
+    const vec3& pos,
+    int cell_id,
+    int actual_max_edge_size,
+    int actual_vertex_size,
+    int actual_ztop_layer,
+    const size_t* number_vertex_on_cell,
+    const size_t* vertices_on_cell,
+    const vec3* vertex_coord,
+    const double* cell_vertex_ztop)
+{
+    constexpr int MAX_VERTEX_NUM = 10;
+
+    if (cell_id < 0) {
+        return -1e10;  // Very deep default for invalid cell
+    }
+
+    int current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
+    if (current_cell_vertices_number <= 0 || current_cell_vertices_number > MAX_VERTEX_NUM) {
+        return -1e10;
+    }
+
+    if (actual_ztop_layer <= 1) {
+        return -1e10;
+    }
+
+    // Get cell vertex indices
+    size_t current_cell_vertices_idx[MAX_VERTEX_NUM];
+    MOPS::CUDAKernel::GetCellVerticesIdx(
+        cell_id,
+        current_cell_vertices_number,
+        current_cell_vertices_idx,
+        MAX_VERTEX_NUM,
+        actual_max_edge_size,
+        vertices_on_cell);
+
+    // Get cell vertex positions
+    vec3 current_cell_vertex_pos[MAX_VERTEX_NUM];
+    if (!MOPS::CUDAKernel::GetCellVertexPos(
+            current_cell_vertex_pos,
+            current_cell_vertices_idx,
+            MAX_VERTEX_NUM,
+            current_cell_vertices_number,
+            vertex_coord)) {
+        return -1e10;
+    }
+
+    // Calculate Wachspress weights
+    double current_cell_vertex_weight[MAX_VERTEX_NUM];
+    for (int i = 0; i < MAX_VERTEX_NUM; ++i) {
+        current_cell_vertex_weight[i] = 0.0;
+    }
+    Interpolator::CalcPolygonWachspress(
+        pos,
+        current_cell_vertex_pos,
+        current_cell_vertex_weight,
+        current_cell_vertices_number);
+
+    // Interpolate zTop at bottom layer (last layer)
+    int bottom_layer = actual_ztop_layer - 1;
+    double ztop_bottom = 0.0;
+    for (int v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx) {
+        int vid = static_cast<int>(current_cell_vertices_idx[v_idx]);
+        if (vid < 0 || vid >= actual_vertex_size) {
+            continue;
+        }
+        double ztop_at_vertex = cell_vertex_ztop[vid * actual_ztop_layer + bottom_layer];
+        ztop_bottom += current_cell_vertex_weight[v_idx] * ztop_at_vertex;
+    }
+
+    return ztop_bottom;
+}
+
 // Helper function: Find nearest edge of a cell to given position
 MOPS_DEVICE inline void FindNearestCellEdgeCUDA(
     const vec3& pos,
@@ -1639,7 +1713,7 @@ MOPS_DEVICE inline vec3 ProjectVelocityOntoEdgeCUDA(
     return vel_parallel;
 }
 
-MOPS_DEVICE inline PathlineVelocityState CalcVelocityAtPathlineWithConstraintsCUDA(
+MOPS_DEVICE inline PathlineVelocityState CalcVelocityAtPathlineCUDA(
     const vec3& pos,
     int cell_id,
     double current_depth,
@@ -2030,7 +2104,7 @@ MOPS_DEVICE inline PathlineVelocityState CalcVelocityAtPathlineWithConstraintsCU
     const double* attr1_back)
 {
     // Calculate velocity normally
-    PathlineVelocityState state = CalcVelocityAtPathlineWithConstraintsCUDA(
+    PathlineVelocityState state = CalcVelocityAtPathlineCUDA(
         pos,
         cell_id,
         current_depth,
@@ -2416,6 +2490,27 @@ __global__ void KernelPathLine(
             }
         }
 
+        // Bottom constraint: prevent particles from going below seafloor
+        // Get bottom zTop (deepest layer) at current position
+        double bottom_ztop = CalcZTopAtBottomCUDA(
+            new_position,
+            cell_id,
+            actual_max_edge_size,
+            actual_vertex_size,
+            actual_ztop_layer,
+            number_vertex_on_cell,
+            vertices_on_cell,
+            vertex_coord,
+            cell_vertex_ztop_front);  // Use front snapshot for bottom check
+
+        // If particle would go below seafloor, clamp to bottom and ignore vertical velocity
+        // (depth values are negative going down, bottom_ztop is most negative)
+        if (new_depth < bottom_ztop) {
+            // Particle is trying to penetrate seafloor - clamp to bottom
+            // This effectively ignores the downward vertical velocity component
+            new_depth = bottom_ztop;
+        }
+
         // Ensure depth is non-negative
         new_depth = fmax(0.0, new_depth);
 
@@ -2423,6 +2518,13 @@ __global__ void KernelPathLine(
         // Note: depth is positive downward, so r_new = r_base - depth for ocean
         // But vertical_velocity is in the radial direction, so we use it directly
         double r_new = r + current_vertical_velocity * static_cast<double>(delta_t);
+
+        // Apply bottom constraint to radius update as well
+        // If we clamped depth due to bottom constraint, adjust radius accordingly
+        if (old_depth - current_vertical_velocity * static_cast<double>(delta_t) < bottom_ztop) {
+            // Don't apply vertical velocity to radius if hitting bottom
+            r_new = r;
+        }
 
         // Ensure radius doesn't go below a minimum (e.g., Earth's radius if applicable)
         // If your domain has a specific base radius, use that instead of 1.0
