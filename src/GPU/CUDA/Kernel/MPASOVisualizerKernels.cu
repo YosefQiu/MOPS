@@ -1092,6 +1092,7 @@ __global__ void KernelStreamLine(
     vec3 sample_point_position;
     vec3 new_position;
     int cell_id = -1;
+    int current_cell_vertices_number = 0;  // Declare here to be accessible throughout the loop
     int cell_neig_vec[MAX_CELL_NEIGHBOR_NUM];
 
     for (int i = 0; i < MAX_CELL_NEIGHBOR_NUM; ++i) {
@@ -1125,7 +1126,7 @@ __global__ void KernelStreamLine(
                 return;
             }
 
-            int current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
+            current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
             double max_len = 1e300;
             for (int idx = 0; idx < current_cell_vertices_number + 1; ++idx) {
                 int cid = cell_neig_vec[idx];
@@ -1713,6 +1714,243 @@ MOPS_DEVICE inline vec3 ProjectVelocityOntoEdgeCUDA(
     return vel_parallel;
 }
 
+// Helper function: Project position to match a given depth
+// Keeps horizontal direction but adjusts radius to match depth
+// This is used after surface/bottom boundary adjustments
+MOPS_DEVICE inline vec3 ProjectPositionToDepth(
+    const vec3& position_raw,
+    double new_depth,
+    double old_depth,
+    double current_radius)
+{
+    // Calculate how much the depth changed
+    // depth is positive downward, radius is from Earth center
+    // If depth decreases (particle rises), radius should increase
+    // If depth increases (particle sinks), radius should decrease
+    double depth_change = old_depth - new_depth;
+    double new_radius = current_radius + depth_change;
+
+    // Ensure minimum radius
+    new_radius = fmax(1.0, new_radius);
+
+    // Keep horizontal direction, adjust radius
+    vec3 direction = position_raw;
+    double direction_len = MOPS_LENGTH(direction);
+    if (direction_len > 1e-12) {
+        direction = direction / direction_len;
+    }
+
+    return direction * new_radius;
+}
+
+// Helper function: Find which cell (current or neighbors) contains the position
+// Returns cell_id if found, -1 if position is outside all cells (true boundary)
+MOPS_DEVICE inline int FindContainingCellInCurrentOrNeighborsCUDA(
+    const vec3& pos,
+    int current_cell_id,
+    int actual_max_edge_size,
+    const size_t* number_vertex_on_cell,
+    const size_t* cells_on_cell,
+    const size_t* vertices_on_cell,
+    const vec3* vertex_coord)
+{
+    constexpr int MAX_VERTEX_NUM = 10;
+
+    // First check current cell (fast path)
+    bool in_current = MOPS::CUDAKernel::IsInMesh(
+        current_cell_id,
+        actual_max_edge_size,
+        pos,
+        number_vertex_on_cell,
+        vertices_on_cell,
+        vertex_coord);
+
+    if (in_current) {
+        return current_cell_id;
+    }
+
+    // Not in current cell - check neighbor cells
+    int current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[current_cell_id]);
+    if (current_cell_vertices_number <= 0 || current_cell_vertices_number > MAX_VERTEX_NUM) {
+        return -1;
+    }
+
+    // Get neighbor cells (use int array to match GetCellNeighborsIdx signature)
+    int cell_neig_vec[MAX_VERTEX_NUM + 1];
+    for (int i = 0; i < MAX_VERTEX_NUM + 1; ++i) {
+        cell_neig_vec[i] = -1;
+    }
+    MOPS::CUDAKernel::GetCellNeighborsIdx(
+        current_cell_id,
+        current_cell_vertices_number,
+        cell_neig_vec,
+        MAX_VERTEX_NUM,
+        actual_max_edge_size,
+        cells_on_cell);
+
+    // Check each neighbor cell
+    for (int i = 0; i < current_cell_vertices_number; ++i) {
+        int neighbor_cell_id = static_cast<int>(cell_neig_vec[i]);
+        if (neighbor_cell_id < 0) {
+            continue;
+        }
+
+        bool in_neighbor = MOPS::CUDAKernel::IsInMesh(
+            neighbor_cell_id,
+            actual_max_edge_size,
+            pos,
+            number_vertex_on_cell,
+            vertices_on_cell,
+            vertex_coord);
+
+        if (in_neighbor) {
+            return neighbor_cell_id;
+        }
+    }
+
+    // Not in current cell or any neighbor - truly outside mesh
+    return -1;
+}
+
+// Helper function: Hash function for deterministic pseudo-random number generation
+MOPS_DEVICE inline unsigned int hash(unsigned int x)
+{
+    x = ((x >> 16) ^ x) * 0x45d9f3b;
+    x = ((x >> 16) ^ x) * 0x45d9f3b;
+    x = ((x >> 16) ^ x);
+    return x;
+}
+
+// Helper function: Generate random float in [0, 1] using hash-based PRNG
+MOPS_DEVICE inline float random_float(int particle_id, int timestep, int component)
+{
+    unsigned int seed = hash(static_cast<unsigned int>(particle_id * 73856093 + timestep * 19349663 + component * 83492791));
+    return (seed & 0xFFFFFF) / 16777216.0f;
+}
+
+// Helper function: Generate random tangent velocity on sphere surface
+// Used to prevent particles from getting stuck at boundaries
+MOPS_DEVICE inline vec3 GenerateRandomTangentVelocityCUDA(
+    const vec3& pos,
+    int particle_id,
+    int timestep,
+    double magnitude,
+    int attempt = 0)  // Added attempt parameter for multiple tries
+{
+    // Normalize position to get radial direction
+    vec3 radial = pos;
+    double radial_len = MOPS_LENGTH(radial);
+    if (radial_len < 1e-12) {
+        return vec3{0.0, 0.0, 0.0};
+    }
+    radial = radial / radial_len;
+
+    // Create arbitrary vector not parallel to radial
+    vec3 arbitrary = (fabs(radial.x()) < 0.9) ? vec3{1.0, 0.0, 0.0} : vec3{0.0, 1.0, 0.0};
+
+    // First tangent vector (Gram-Schmidt orthogonalization)
+    vec3 tangent1 = arbitrary - radial * MOPS_DOT(arbitrary, radial);
+    double tangent1_len = MOPS_LENGTH(tangent1);
+    if (tangent1_len < 1e-12) {
+        return vec3{0.0, 0.0, 0.0};
+    }
+    tangent1 = tangent1 / tangent1_len;
+
+    // Second tangent vector (cross product)
+    vec3 tangent2 = vec3{
+        radial.y() * tangent1.z() - radial.z() * tangent1.y(),
+        radial.z() * tangent1.x() - radial.x() * tangent1.z(),
+        radial.x() * tangent1.y() - radial.y() * tangent1.x()
+    };
+    double tangent2_len = MOPS_LENGTH(tangent2);
+    if (tangent2_len < 1e-12) {
+        return vec3{0.0, 0.0, 0.0};
+    }
+    tangent2 = tangent2 / tangent2_len;
+
+    // Random angle in [0, 2π] - use attempt number to get different directions
+    float rand_val = random_float(particle_id, timestep, attempt);
+    double angle = static_cast<double>(rand_val) * 2.0 * 3.14159265359;
+
+    // Random tangent direction
+    vec3 random_direction = tangent1 * cos(angle) + tangent2 * sin(angle);
+
+    return random_direction * magnitude;
+}
+
+// Helper function: Try multiple random directions to find valid escape
+// Returns true if valid position found, false if all attempts failed
+MOPS_DEVICE inline bool TryMultipleRandomDirectionsCUDA(
+    const vec3& current_position,
+    int cell_id,
+    int global_id,
+    int i_step,
+    double r,
+    double r_new,
+    double delta_t,
+    int actual_max_edge_size,
+    const size_t* number_vertex_on_cell,
+    const size_t* vertices_on_cell,
+    const vec3* vertex_coord,
+    vec3& out_position,
+    double& out_kick_speed)
+{
+    // Progressive kick speeds: start small, increase if needed
+    constexpr int MAX_ATTEMPTS = 20;
+    constexpr double BASE_KICK_SPEED = 0.01;  // 1 cm/s
+
+    for (int attempt = 0; attempt < MAX_ATTEMPTS; ++attempt) {
+        // Increase kick speed every 5 attempts
+        double kick_speed = BASE_KICK_SPEED * (1.0 + (attempt / 5) * 2.0);
+
+        // Generate random velocity with different seed for each attempt
+        vec3 random_vel = GenerateRandomTangentVelocityCUDA(
+            current_position,
+            global_id,
+            i_step,
+            kick_speed,
+            attempt);  // Different attempt number = different random direction
+
+        // Calculate new position with random velocity
+        vec3 random_rotation_axis = MOPS::CUDAKernel::CalcRotationAxis(
+            current_position,
+            random_vel);
+        double random_theta_rad = (kick_speed * delta_t) / r;
+
+        vec3 random_candidate = MOPS::CUDAKernel::CalcPositionAfterRotation(
+            current_position,
+            random_rotation_axis,
+            random_theta_rad);
+
+        // Rescale to correct radius
+        double random_len = MOPS_LENGTH(random_candidate);
+        if (random_len > 1e-12) {
+            random_candidate = (random_candidate / random_len) * r_new;
+        }
+
+        // Validate random direction - check if it's in the SAME cell first (fast)
+        bool random_is_valid = MOPS::CUDAKernel::IsInMesh(
+            cell_id,
+            actual_max_edge_size,
+            random_candidate,
+            number_vertex_on_cell,
+            vertices_on_cell,
+            vertex_coord);
+
+        if (random_is_valid) {
+            out_position = random_candidate;
+            out_kick_speed = kick_speed;
+            return true;
+        }
+
+        // If not in same cell, try a few more attempts before giving up
+        // This allows particles to potentially move to neighboring cells
+    }
+
+    // All attempts failed
+    return false;
+}
+
 MOPS_DEVICE inline PathlineVelocityState CalcVelocityAtPathlineCUDA(
     const vec3& pos,
     int cell_id,
@@ -2199,11 +2437,17 @@ __global__ void KernelPathLine(
     const double* attr0_front,
     const double* attr1_front,
     const double* attr0_back,
-    const double* attr1_back)
+    const double* attr1_back,
+    int* boundary_hit_count)
 {
     const int global_id = static_cast<int>(blockIdx.x) * blockDim.x + threadIdx.x;
     if (global_id >= particle_count || each_points_size <= 0 || n_steps <= 0) {
         return;
+    }
+
+    // Initialize boundary hit counter for this particle
+    if (boundary_hit_count != nullptr) {
+        boundary_hit_count[global_id] = 0;
     }
 
     constexpr int MAX_VERTEX_NUM = 10;
@@ -2220,6 +2464,7 @@ __global__ void KernelPathLine(
     vec3 sample_point_position;
     vec3 new_position;
     int cell_id = -1;
+    int current_cell_vertices_number = 0;  // Declare here to be accessible throughout the loop
     int cell_neig_vec[MAX_CELL_NEIGHBOR_NUM];
 
     for (int i = 0; i < MAX_CELL_NEIGHBOR_NUM; ++i) {
@@ -2242,7 +2487,7 @@ __global__ void KernelPathLine(
                 return;
             }
 
-            int current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
+            current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
             MOPS::CUDAKernel::GetCellNeighborsIdx(
                 cell_id,
                 current_cell_vertices_number,
@@ -2256,7 +2501,7 @@ __global__ void KernelPathLine(
                 return;
             }
 
-            int current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
+            current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
             double max_len = 1e300;
             for (int idx = 0; idx < current_cell_vertices_number + 1; ++idx) {
                 int cid = cell_neig_vec[idx];
@@ -2270,6 +2515,10 @@ __global__ void KernelPathLine(
                     cell_id = cid;
                 }
             }
+
+            // BUG FIX: Update vertex count after cell_id changed
+            // Must match new cell's vertex count, not old cell's
+            current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
 
             MOPS::CUDAKernel::GetCellNeighborsIdx(
                 cell_id,
@@ -2437,13 +2686,13 @@ __global__ void KernelPathLine(
             current_attrs = (s1.attr + 2.0 * s2.attr + 2.0 * s3.attr + s4.attr) / 6.0;
             current_vertical_velocity = (s1.v_vel + 2.0 * s2.v_vel + 2.0 * s3.v_vel + s4.v_vel) / 6.0;
 
-            vec3 x_trial = current_position + current_horizontal_velocity * dt;
-            double x_trial_len = MOPS_LENGTH(x_trial);
-            if (x_trial_len > 1e-12) {
-                rk4_next_position = (x_trial / x_trial_len) * r;
-            } else {
-                rk4_next_position = current_position;
-            }
+            // BUG FIX: RK4 should use spherical rotation, same as Euler
+            // Old method was: x_trial = pos + vel*dt, then normalize (Cartesian + project)
+            // New method: spherical rotation along great circle (geometrically consistent)
+            vec3 rotation_axis = MOPS::CUDAKernel::CalcRotationAxis(current_position, current_horizontal_velocity);
+            double speed = MOPS_LENGTH(current_horizontal_velocity);
+            double theta_rad = (speed * dt) / r;
+            rk4_next_position = MOPS::CUDAKernel::CalcPositionAfterRotation(current_position, rotation_axis, theta_rad);
         }
 
         if (use_euler) {
@@ -2464,13 +2713,42 @@ __global__ void KernelPathLine(
             write_attrs[base_idx] = current_attrs;
         }
 
-        double old_depth = static_cast<double>(particle_depths[global_id]);
-        double new_depth = old_depth - current_vertical_velocity * static_cast<double>(delta_t);
+        // ========================================================================
+        // VERTICAL BOUNDARY CONDITIONS
+        // (Section 7 of pathline_cuda_summary.md - EXACT IMPLEMENTATION)
+        // ========================================================================
 
-        // Surface constraint: prevent particles from leaving the water
-        // Get surface zTop (level 0) at current position
+        // Store the tentative horizontal position (already computed by Euler/RK4)
+        vec3 new_position_raw = new_position;
+        double old_depth = static_cast<double>(particle_depths[global_id]);
+
+        // STEP 1: Compute bottom clearance at time t in CURRENT cell
+        // (Section 7.3, lines 617-628)
+        double bottom_ztop_t = CalcZTopAtBottomCUDA(
+            current_position,  // ← At time t, in CURRENT cell
+            cell_id,           // ← CURRENT cell
+            actual_max_edge_size,
+            actual_vertex_size,
+            actual_ztop_layer,
+            number_vertex_on_cell,
+            vertices_on_cell,
+            vertex_coord,
+            cell_vertex_ztop_front);
+
+        double bottom_depth_t = -bottom_ztop_t;
+        double d = bottom_depth_t - old_depth;  // Clearance from bottom
+        d = fmax(d, 0.0);  // Ensure non-negative
+
+        // STEP 2: Compute tentative depth from vertical velocity
+        // (Section 7.3, line 638)
+        double new_depth_raw = old_depth - current_vertical_velocity * static_cast<double>(delta_t);
+
+        // STEP 3: SURFACE BOUNDARY PROJECTION
+        // (Section 7.2, lines 487-505)
+
+        // 3a: Evaluate surface level at tentative horizontal position
         double surface_ztop = CalcZTopAtLevel0CUDA(
-            new_position,
+            new_position_raw,  // ← Tentative NEW horizontal position
             cell_id,
             actual_max_edge_size,
             actual_vertex_size,
@@ -2478,64 +2756,272 @@ __global__ void KernelPathLine(
             number_vertex_on_cell,
             vertices_on_cell,
             vertex_coord,
-            cell_vertex_ztop_front);  // Use front snapshot for surface check
+            cell_vertex_ztop_front);
 
-        // If particle would go above surface (negative depth relative to surface), clamp it
-        double depth_relative_to_surface = -surface_ztop - new_depth;
-        if (depth_relative_to_surface < 0.0 || new_depth < 0.0) {
-            // Particle is trying to leave water - clamp to surface
-            new_depth = -surface_ztop;  // Set depth to surface level
-            if (new_depth < 0.0) {
-                new_depth = 0.0;  // Safety clamp to ensure non-negative
+        double surface_depth = -surface_ztop;
+
+        // 3b: Apply surface projection
+        double new_depth = new_depth_raw;
+        if (new_depth_raw < surface_depth) {
+            new_depth = surface_depth;
+        }
+        new_depth = fmax(new_depth, 0.0);
+
+        // STEP 4: BOTTOM BOUNDARY PROJECTION (BOTTOM-FOLLOWING)
+        // (Section 7.3, lines 641-667)
+
+        // 4a: Find which cell contains the tentative horizontal position
+        int tentative_cell = FindContainingCellInCurrentOrNeighborsCUDA(
+            new_position_raw,
+            cell_id,
+            actual_max_edge_size,
+            number_vertex_on_cell,
+            cells_on_cell,
+            vertices_on_cell,
+            vertex_coord);
+
+        int target_cell_for_bottom = (tentative_cell >= 0) ? tentative_cell : cell_id;
+
+        // 4b: Evaluate bottom depth at NEW horizontal position in TARGET cell
+        double bottom_ztop_next = CalcZTopAtBottomCUDA(
+            new_position_raw,      // ← Tentative NEW horizontal position
+            target_cell_for_bottom, // ← TARGET cell
+            actual_max_edge_size,
+            actual_vertex_size,
+            actual_ztop_layer,
+            number_vertex_on_cell,
+            vertices_on_cell,
+            vertex_coord,
+            cell_vertex_ztop_front);
+
+        double bottom_depth_next = -bottom_ztop_next;
+
+        // 4c: Bottom-following projection - preserve clearance d
+        if (new_depth > bottom_depth_next) {
+            new_depth = bottom_depth_next - d;
+        }
+
+        // STEP 5: Final clamping to keep particle in water column
+        // (Section 7.3, lines 670-671)
+        new_depth = fmax(new_depth, surface_depth);
+        new_depth = fmin(new_depth, bottom_depth_next);
+
+        // STEP 6: Project position to match adjusted depth
+        // (Section 7.2 line 500, Section 7.3 lines 674-678)
+        // "Keep the tentative horizontal movement, but update the radial/depth position"
+        new_position = ProjectPositionToDepth(
+            new_position_raw,
+            new_depth,
+            old_depth,
+            r);
+
+        // Store corrected depth
+        particle_depths[global_id] = static_cast<float>(new_depth);
+
+        // Get the new radius from the adjusted position
+        // This is needed for lateral boundary handling below
+        double r_new = MOPS_LENGTH(new_position);
+
+        // CRITICAL FIX: Check if position is in current cell OR neighbor cells
+        // This distinguishes normal cell crossing from true boundary hits
+        int containing_cell = FindContainingCellInCurrentOrNeighborsCUDA(
+            new_position,
+            cell_id,
+            actual_max_edge_size,
+            number_vertex_on_cell,
+            cells_on_cell,
+            vertices_on_cell,
+            vertex_coord);
+
+        if (containing_cell >= 0) {
+            // Normal case: position is in current cell or neighbor cell
+            if (containing_cell != cell_id) {
+                // Cell crossing - update cell_id and vertex count
+                cell_id = containing_cell;
+                current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
+
+                // Update neighbor list for new cell
+                MOPS::CUDAKernel::GetCellNeighborsIdx(
+                    cell_id,
+                    current_cell_vertices_number,
+                    cell_neig_vec,
+                    MAX_VERTEX_NUM,
+                    actual_max_edge_size,
+                    cells_on_cell);
+            }
+            // Position is valid, no boundary handling needed
+        } else {
+            // Truly outside mesh (hit land/boundary) - apply boundary projection
+            if (boundary_hit_count != nullptr) {
+                atomicAdd(&boundary_hit_count[global_id], 1);
+            }
+
+            #ifdef __CUDA_ARCH__
+            // Print detailed info for debugging (limit output to avoid spam)
+            if (i_step < 5 || (i_step % 100 == 0)) {
+                printf("🌊 Particle %d: Boundary hit at step %d, cell %d\n",
+                       global_id, i_step, cell_id);
+            }
+            #endif
+
+            // Find nearest edge of current cell
+            int edge_va_idx = -1;
+            int edge_vb_idx = -1;
+            FindNearestCellEdgeCUDA(
+                current_position,
+                cell_id,
+                actual_max_edge_size,
+                number_vertex_on_cell,
+                vertices_on_cell,
+                vertex_coord,
+                edge_va_idx,
+                edge_vb_idx);
+
+            if (edge_va_idx >= 0 && edge_vb_idx >= 0) {
+                vec3 va = vertex_coord[edge_va_idx];
+                vec3 vb = vertex_coord[edge_vb_idx];
+
+                // Project velocity onto boundary edge
+                vec3 projected_vel = ProjectVelocityOntoEdgeCUDA(
+                    current_horizontal_velocity,
+                    current_position,
+                    va,
+                    vb);
+
+                double original_speed = MOPS_LENGTH(current_horizontal_velocity);
+                double projected_speed = MOPS_LENGTH(projected_vel);
+
+                #ifdef __CUDA_ARCH__
+                if (i_step < 5 || (i_step % 100 == 0)) {
+                    printf("  → Edge (%d,%d): speed %.6f → %.6f (%.1f%% retained)\n",
+                           edge_va_idx, edge_vb_idx,
+                           original_speed, projected_speed,
+                           original_speed > 1e-12 ? 100.0 * projected_speed / original_speed : 0.0);
+                }
+                #endif
+
+                // Recalculate position moving along the boundary edge
+                vec3 rotation_axis = MOPS::CUDAKernel::CalcRotationAxis(
+                    current_position,
+                    projected_vel);
+                double theta_rad = (projected_speed * delta_t) / r;
+
+                vec3 candidate_position = MOPS::CUDAKernel::CalcPositionAfterRotation(
+                    current_position,
+                    rotation_axis,
+                    theta_rad);
+
+                // Rescale with same radius
+                double candidate_len = MOPS_LENGTH(candidate_position);
+                if (candidate_len > 1e-12) {
+                    candidate_position = (candidate_position / candidate_len) * r_new;
+                }
+
+                // CRITICAL: Verify the projected position is still in valid mesh
+                bool projected_is_valid = MOPS::CUDAKernel::IsInMesh(
+                    cell_id,
+                    actual_max_edge_size,
+                    candidate_position,
+                    number_vertex_on_cell,
+                    vertices_on_cell,
+                    vertex_coord);
+
+                if (projected_is_valid) {
+                    // Projection successful - use new position
+                    new_position = candidate_position;
+                    #ifdef __CUDA_ARCH__
+                    if (i_step < 5 || (i_step % 100 == 0)) {
+                        printf("  ✓ Projected position validated (in mesh)\n");
+                    }
+                    #endif
+                } else {
+                    // Projection failed - try multiple random directions to prevent stagnation
+                    #ifdef __CUDA_ARCH__
+                    if (i_step < 5 || (i_step % 100 == 0)) {
+                        printf("  ⚠️  Projected position INVALID - trying multiple random directions\n");
+                    }
+                    #endif
+
+                    vec3 escaped_position;
+                    double used_kick_speed = 0.0;
+                    bool escape_successful = TryMultipleRandomDirectionsCUDA(
+                        current_position,
+                        cell_id,
+                        global_id,
+                        i_step,
+                        r,
+                        r_new,
+                        delta_t,
+                        actual_max_edge_size,
+                        number_vertex_on_cell,
+                        vertices_on_cell,
+                        vertex_coord,
+                        escaped_position,
+                        used_kick_speed);
+
+                    if (escape_successful) {
+                        new_position = escaped_position;
+                        #ifdef __CUDA_ARCH__
+                        if (i_step < 5 || (i_step % 100 == 0)) {
+                            printf("  🎲 Random escape successful (speed=%.6f m/s)\n", used_kick_speed);
+                        }
+                        #endif
+                    } else {
+                        // All random directions failed - particle truly trapped
+                        // Keep current position (safe, doesn't produce NaN)
+                        new_position = current_position;
+                        #ifdef __CUDA_ARCH__
+                        if (i_step < 5 || (i_step % 100 == 0)) {
+                            printf("  ⛔ Particle trapped after 20 attempts\n");
+                        }
+                        #endif
+                    }
+                }
+            } else {
+                // Edge detection failed - try multiple random directions
+                #ifdef __CUDA_ARCH__
+                if (i_step < 5 || (i_step % 100 == 0)) {
+                    printf("  ⚠️  Edge detection FAILED - trying multiple random directions\n");
+                }
+                #endif
+
+                vec3 escaped_position;
+                double used_kick_speed = 0.0;
+                bool escape_successful = TryMultipleRandomDirectionsCUDA(
+                    current_position,
+                    cell_id,
+                    global_id,
+                    i_step,
+                    r,
+                    r_new,
+                    delta_t,
+                    actual_max_edge_size,
+                    number_vertex_on_cell,
+                    vertices_on_cell,
+                    vertex_coord,
+                    escaped_position,
+                    used_kick_speed);
+
+                if (escape_successful) {
+                    new_position = escaped_position;
+                    #ifdef __CUDA_ARCH__
+                    if (i_step < 5 || (i_step % 100 == 0)) {
+                        printf("  🎲 Random escape successful (speed=%.6f m/s)\n", used_kick_speed);
+                    }
+                    #endif
+                } else {
+                    // All random directions failed - particle truly trapped
+                    // Keep current position (safe, doesn't produce NaN)
+                    new_position = current_position;
+                    #ifdef __CUDA_ARCH__
+                    if (i_step < 5 || (i_step % 100 == 0)) {
+                        printf("  ⛔ Particle trapped after 20 attempts\n");
+                    }
+                    #endif
+                }
             }
         }
 
-        // Bottom constraint: prevent particles from going below seafloor
-        // Get bottom zTop (deepest layer) at current position
-        double bottom_ztop = CalcZTopAtBottomCUDA(
-            new_position,
-            cell_id,
-            actual_max_edge_size,
-            actual_vertex_size,
-            actual_ztop_layer,
-            number_vertex_on_cell,
-            vertices_on_cell,
-            vertex_coord,
-            cell_vertex_ztop_front);  // Use front snapshot for bottom check
-
-        // If particle would go below seafloor, clamp to bottom and ignore vertical velocity
-        // (depth values are negative going down, bottom_ztop is most negative)
-        if (new_depth < bottom_ztop) {
-            // Particle is trying to penetrate seafloor - clamp to bottom
-            // This effectively ignores the downward vertical velocity component
-            new_depth = bottom_ztop;
-        }
-
-        // Ensure depth is non-negative
-        new_depth = fmax(0.0, new_depth);
-
-        // Update radius based on new depth
-        // Note: depth is positive downward, so r_new = r_base - depth for ocean
-        // But vertical_velocity is in the radial direction, so we use it directly
-        double r_new = r + current_vertical_velocity * static_cast<double>(delta_t);
-
-        // Apply bottom constraint to radius update as well
-        // If we clamped depth due to bottom constraint, adjust radius accordingly
-        if (old_depth - current_vertical_velocity * static_cast<double>(delta_t) < bottom_ztop) {
-            // Don't apply vertical velocity to radius if hitting bottom
-            r_new = r;
-        }
-
-        // Ensure radius doesn't go below a minimum (e.g., Earth's radius if applicable)
-        // If your domain has a specific base radius, use that instead of 1.0
-        r_new = fmax(1.0, r_new);
-
-        particle_depths[global_id] = static_cast<float>(new_depth);
-
-        double new_len = MOPS_LENGTH(new_position);
-        if (new_len > 1e-12) {
-            new_position = (new_position / new_len) * r_new;
-        }
         sample_points[global_id] = new_position;
 
         int record_stride = record_t / delta_t;
@@ -2669,6 +3155,10 @@ std::vector<TrajectoryLine> PathLine(
         d_attr1_back = DeviceAllocAndCopy(*back_attr_ptrs[1], "cudaMalloc/cudaMemcpy path attr1Back");
     }
 
+    // Allocate boundary hit counter array
+    std::vector<int> boundary_hit_count_host(particle_count, 0);
+    int* d_boundary_hit_count = DeviceAllocAndCopy(boundary_hit_count_host, "cudaMalloc/cudaMemcpy path boundary_hit_count");
+
     dim3 block(128);
     dim3 grid((particle_count + block.x - 1) / block.x);
 
@@ -2707,7 +3197,8 @@ std::vector<TrajectoryLine> PathLine(
         d_attr0_front,
         d_attr1_front,
         d_attr0_back,
-        d_attr1_back);
+        d_attr1_back,
+        d_boundary_hit_count);
 
     CheckCuda(cudaGetLastError(), "KernelPathLine launch");
     CheckCuda(cudaDeviceSynchronize(), "KernelPathLine sync");
@@ -2736,6 +3227,50 @@ std::vector<TrajectoryLine> PathLine(
             cudaMemcpyDeviceToHost),
         "cudaMemcpy path attrs");
 
+    // Copy boundary hit data back to host
+    CheckCuda(
+        cudaMemcpy(
+            boundary_hit_count_host.data(),
+            d_boundary_hit_count,
+            boundary_hit_count_host.size() * sizeof(int),
+            cudaMemcpyDeviceToHost),
+        "cudaMemcpy path boundary_hit_count");
+
+    // Report boundary hit statistics
+    int total_boundary_hits = 0;
+    int particles_affected = 0;
+    int max_hits_per_particle = 0;
+    for (int i = 0; i < particle_count; ++i) {
+        if (boundary_hit_count_host[i] > 0) {
+            particles_affected++;
+            total_boundary_hits += boundary_hit_count_host[i];
+            if (boundary_hit_count_host[i] > max_hits_per_particle) {
+                max_hits_per_particle = boundary_hit_count_host[i];
+            }
+
+            // Log particles with many boundary hits
+            if (boundary_hit_count_host[i] > 10) {
+                printf("⚠️  Particle %d hit boundary %d times\n",
+                       i, boundary_hit_count_host[i]);
+            }
+        }
+    }
+
+    if (particles_affected > 0) {
+        printf("\n🎯 ===== Lateral Boundary Projection Summary =====\n");
+        printf("   Particles affected: %d / %d (%.1f%%)\n",
+               particles_affected, particle_count,
+               100.0 * particles_affected / particle_count);
+        printf("   Total boundary hits: %d\n", total_boundary_hits);
+        printf("   Average hits per affected particle: %.1f\n",
+               (double)total_boundary_hits / particles_affected);
+        printf("   Maximum hits for single particle: %d\n", max_hits_per_particle);
+        printf("================================================\n\n");
+    } else {
+        printf("✅ No particles hit lateral boundaries (all stayed in valid ocean domain)\n");
+    }
+
+    FreeDev(d_boundary_hit_count, "cudaFree path boundary_hit_count");
     FreeDev(d_attr1_back, "cudaFree path attr1Back");
     FreeDev(d_attr1_front, "cudaFree path attr1Front");
     FreeDev(d_attr0_back, "cudaFree path attr0Back");
