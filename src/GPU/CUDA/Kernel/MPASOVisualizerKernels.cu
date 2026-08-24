@@ -2595,6 +2595,23 @@ __global__ void KernelPathLine(
                 attr0_back,
                 attr1_back);
 
+            // PERTURBATION: Add random velocity if speed is too low (k1 stage)
+            constexpr double VEL_THRESH = 1e-4;      // 0.1 mm/s
+            constexpr double SIGMA_H = 0.01;         // 1 cm/s horizontal
+            constexpr double SIGMA_V = 0.00001;      // 0.01 mm/s vertical
+
+            double s1_h_mag = MOPS_LENGTH(s1.h_vel);
+            if (s1_h_mag < VEL_THRESH) {
+                vec3 perturb_h = GenerateRandomTangentVelocityCUDA(
+                    current_position, global_id, i_step * 4 + 1, SIGMA_H);
+                s1.h_vel = s1.h_vel + perturb_h;
+            }
+            if (fabs(s1.v_vel) < VEL_THRESH) {
+                float r1 = random_float(global_id, i_step * 4 + 1, 10);
+                float r2 = random_float(global_id, i_step * 4 + 1, 20);
+                s1.v_vel += SIGMA_V * (r1 - 0.5 + r2 - 0.5);
+            }
+
             vec3 p2 = AdvectOnSphereCUDA(current_position, s1.h_vel, dt * 0.5);
             double a2 = a1 + 0.5 * dalpha;
             if (a2 > 1.0) a2 = 1.0;
@@ -2623,6 +2640,19 @@ __global__ void KernelPathLine(
                 attr1_front,
                 attr0_back,
                 attr1_back);
+
+            // PERTURBATION: Add random velocity if speed is too low (k2 stage)
+            double s2_h_mag = MOPS_LENGTH(s2.h_vel);
+            if (s2_h_mag < VEL_THRESH) {
+                vec3 perturb_h = GenerateRandomTangentVelocityCUDA(
+                    p2, global_id, i_step * 4 + 2, SIGMA_H);
+                s2.h_vel = s2.h_vel + perturb_h;
+            }
+            if (fabs(s2.v_vel) < VEL_THRESH) {
+                float r1 = random_float(global_id, i_step * 4 + 2, 10);
+                float r2 = random_float(global_id, i_step * 4 + 2, 20);
+                s2.v_vel += SIGMA_V * (r1 - 0.5 + r2 - 0.5);
+            }
 
             vec3 p3 = AdvectOnSphereCUDA(current_position, s2.h_vel, dt * 0.5);
             double a3 = a1 + 0.5 * dalpha;
@@ -2653,6 +2683,19 @@ __global__ void KernelPathLine(
                 attr0_back,
                 attr1_back);
 
+            // PERTURBATION: Add random velocity if speed is too low (k3 stage)
+            double s3_h_mag = MOPS_LENGTH(s3.h_vel);
+            if (s3_h_mag < VEL_THRESH) {
+                vec3 perturb_h = GenerateRandomTangentVelocityCUDA(
+                    p3, global_id, i_step * 4 + 3, SIGMA_H);
+                s3.h_vel = s3.h_vel + perturb_h;
+            }
+            if (fabs(s3.v_vel) < VEL_THRESH) {
+                float r1 = random_float(global_id, i_step * 4 + 3, 10);
+                float r2 = random_float(global_id, i_step * 4 + 3, 20);
+                s3.v_vel += SIGMA_V * (r1 - 0.5 + r2 - 0.5);
+            }
+
             vec3 p4 = AdvectOnSphereCUDA(current_position, s3.h_vel, dt);
             double a4 = a1 + dalpha;
             if (a4 > 1.0) a4 = 1.0;
@@ -2681,6 +2724,19 @@ __global__ void KernelPathLine(
                 attr1_front,
                 attr0_back,
                 attr1_back);
+
+            // PERTURBATION: Add random velocity if speed is too low (k4 stage)
+            double s4_h_mag = MOPS_LENGTH(s4.h_vel);
+            if (s4_h_mag < VEL_THRESH) {
+                vec3 perturb_h = GenerateRandomTangentVelocityCUDA(
+                    p4, global_id, i_step * 4 + 4, SIGMA_H);
+                s4.h_vel = s4.h_vel + perturb_h;
+            }
+            if (fabs(s4.v_vel) < VEL_THRESH) {
+                float r1 = random_float(global_id, i_step * 4 + 4, 10);
+                float r2 = random_float(global_id, i_step * 4 + 4, 20);
+                s4.v_vel += SIGMA_V * (r1 - 0.5 + r2 - 0.5);
+            }
 
             current_horizontal_velocity = (s1.h_vel + 2.0 * s2.h_vel + 2.0 * s3.h_vel + s4.h_vel) / 6.0;
             current_attrs = (s1.attr + 2.0 * s2.attr + 2.0 * s3.attr + s4.attr) / 6.0;
@@ -3092,28 +3148,29 @@ std::vector<TrajectoryLine> PathLine(
     const int actual_ztop_layer = static_cast<int>(grid_info_vec[4]);
     const int actual_ztop_layer_p1 = static_cast<int>(grid_info_vec[5]);
 
-    const bool has_double_attributes = (mpasoF->mSol_Front->mDoubleAttributes.size() > 1);
-
+    // Collect attribute pointers from CtoV (vertex-interpolated) data
     std::vector<const std::vector<double>*> front_attr_ptrs;
     std::vector<const std::vector<double>*> back_attr_ptrs;
-    if (has_double_attributes) {
-        for (const auto& kv : mpasoF->mSol_Front->mDoubleAttributes_CtoV) {
-            front_attr_ptrs.push_back(&kv.second);
-            if (front_attr_ptrs.size() == 2) {
-                break;
-            }
-        }
-        for (const auto& kv : mpasoF->mSol_Back->mDoubleAttributes_CtoV) {
-            back_attr_ptrs.push_back(&kv.second);
-            if (back_attr_ptrs.size() == 2) {
-                break;
-            }
+
+    for (const auto& kv : mpasoF->mSol_Front->mDoubleAttributes_CtoV) {
+        front_attr_ptrs.push_back(&kv.second);
+        if (front_attr_ptrs.size() == 2) {
+            break;
         }
     }
+    for (const auto& kv : mpasoF->mSol_Back->mDoubleAttributes_CtoV) {
+        back_attr_ptrs.push_back(&kv.second);
+        if (back_attr_ptrs.size() == 2) {
+            break;
+        }
+    }
+
     int attr_count = static_cast<int>(front_attr_ptrs.size());
     if (static_cast<int>(back_attr_ptrs.size()) < attr_count) {
         attr_count = static_cast<int>(back_attr_ptrs.size());
     }
+
+    const bool has_double_attributes = (attr_count > 0);
 
     const int particle_count = static_cast<int>(stable_points.size());
     const int each_points_size = static_cast<int>(config->simulationDuration / config->recordT);
@@ -3235,40 +3292,6 @@ std::vector<TrajectoryLine> PathLine(
             boundary_hit_count_host.size() * sizeof(int),
             cudaMemcpyDeviceToHost),
         "cudaMemcpy path boundary_hit_count");
-
-    // Report boundary hit statistics
-    int total_boundary_hits = 0;
-    int particles_affected = 0;
-    int max_hits_per_particle = 0;
-    for (int i = 0; i < particle_count; ++i) {
-        if (boundary_hit_count_host[i] > 0) {
-            particles_affected++;
-            total_boundary_hits += boundary_hit_count_host[i];
-            if (boundary_hit_count_host[i] > max_hits_per_particle) {
-                max_hits_per_particle = boundary_hit_count_host[i];
-            }
-
-            // Log particles with many boundary hits
-            if (boundary_hit_count_host[i] > 10) {
-                printf("⚠️  Particle %d hit boundary %d times\n",
-                       i, boundary_hit_count_host[i]);
-            }
-        }
-    }
-
-    if (particles_affected > 0) {
-        printf("\n🎯 ===== Lateral Boundary Projection Summary =====\n");
-        printf("   Particles affected: %d / %d (%.1f%%)\n",
-               particles_affected, particle_count,
-               100.0 * particles_affected / particle_count);
-        printf("   Total boundary hits: %d\n", total_boundary_hits);
-        printf("   Average hits per affected particle: %.1f\n",
-               (double)total_boundary_hits / particles_affected);
-        printf("   Maximum hits for single particle: %d\n", max_hits_per_particle);
-        printf("================================================\n\n");
-    } else {
-        printf("✅ No particles hit lateral boundaries (all stayed in valid ocean domain)\n");
-    }
 
     FreeDev(d_boundary_hit_count, "cudaFree path boundary_hit_count");
     FreeDev(d_attr1_back, "cudaFree path attr1Back");

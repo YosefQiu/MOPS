@@ -36,27 +36,58 @@ __global__ void KernelCalcCellVertexZtop(
 
     constexpr int kNeighborNum = 3;
     size_t neighbor_cells[kNeighborNum] = {0, 0, 0};
-    bool boundary = false;
+    int valid_count = 0;
 
+    // Collect valid neighbors
     for (int i = 0; i < kNeighborNum; ++i) {
         const size_t raw_id = cells_on_vertex[vertex_idx * kNeighborNum + i];
         if (raw_id == 0) {
-            boundary = true;
             continue;
         }
         const size_t cid = raw_id - 1;
         if (cid >= cells_size) {
-            boundary = true;
             continue;
         }
-        neighbor_cells[i] = cid;
+        neighbor_cells[valid_count++] = cid;
     }
 
-    if (boundary) {
+    // Handle boundary vertices based on number of valid neighbors
+    if (valid_count == 0) {
+        // Isolated vertex - set to 0 (extremely rare)
         cell_vertex_ztop[tid] = 0.0;
         return;
     }
+    else if (valid_count == 1) {
+        // 1 neighbor: directly copy the neighbor's value
+        cell_vertex_ztop[tid] = cell_center_ztop[neighbor_cells[0] * total_layer + layer];
+        return;
+    }
+    else if (valid_count == 2) {
+        // 2 neighbors: use inverse distance weighting
+        const vec3 p = vertex_coord[vertex_idx];
+        const vec3 p1 = cell_coord[neighbor_cells[0]];
+        const vec3 p2 = cell_coord[neighbor_cells[1]];
 
+        // Calculate distances from vertex to each cell center
+        const double d1 = MOPS_LENGTH(p - p1);
+        const double d2 = MOPS_LENGTH(p - p2);
+
+        // Inverse distance weights (closer cells get more weight)
+        const double eps = 1e-12;
+        const double inv_d1 = 1.0 / (d1 + eps);
+        const double inv_d2 = 1.0 / (d2 + eps);
+        const double sum_inv_d = inv_d1 + inv_d2;
+        const double w1 = inv_d1 / sum_inv_d;
+        const double w2 = inv_d2 / sum_inv_d;
+
+        const double s1 = cell_center_ztop[neighbor_cells[0] * total_layer + layer];
+        const double s2 = cell_center_ztop[neighbor_cells[1] * total_layer + layer];
+
+        cell_vertex_ztop[tid] = w1 * s1 + w2 * s2;
+        return;
+    }
+
+    // Normal case: 3 neighbors - standard barycentric interpolation
     const vec3 p = vertex_coord[vertex_idx];
     const vec3 p1 = cell_coord[neighbor_cells[0]];
     const vec3 p2 = cell_coord[neighbor_cells[1]];
@@ -95,27 +126,66 @@ __global__ void KernelCalcCellCenterToVertex(
 
     constexpr int kNeighborNum = 3;
     size_t neighbor_cells[kNeighborNum] = {0, 0, 0};
-    bool boundary = false;
+    int valid_count = 0;
 
+    // Collect valid neighbors
     for (int i = 0; i < kNeighborNum; ++i) {
         const size_t raw_id = cells_on_vertex[vertex_idx * kNeighborNum + i];
         if (raw_id == 0) {
-            boundary = true;
             continue;
         }
         const size_t cid = raw_id - 1;
         if (cid >= cells_size) {
-            boundary = true;
             continue;
         }
-        neighbor_cells[i] = cid;
+        neighbor_cells[valid_count++] = cid;
     }
 
-    if (boundary) {
+    // Handle boundary vertices based on number of valid neighbors
+    if (valid_count == 0) {
+        // Isolated vertex - set to 0 (extremely rare)
         cell_vertex_attr[tid] = 0.0;
         return;
     }
+    else if (valid_count == 1) {
+        // 1 neighbor: directly copy the neighbor's value
+        double value = cell_center_attr[neighbor_cells[0] * total_layer + layer];
+        if (value < 0.0) {
+            value = 0.0;
+        }
+        cell_vertex_attr[tid] = value;
+        return;
+    }
+    else if (valid_count == 2) {
+        // 2 neighbors: use inverse distance weighting
+        const vec3 p = vertex_coord[vertex_idx];
+        const vec3 p1 = cell_coord[neighbor_cells[0]];
+        const vec3 p2 = cell_coord[neighbor_cells[1]];
 
+        // Calculate distances from vertex to each cell center
+        const double d1 = MOPS_LENGTH(p - p1);
+        const double d2 = MOPS_LENGTH(p - p2);
+
+        // Inverse distance weights (closer cells get more weight)
+        const double eps = 1e-12;
+        const double inv_d1 = 1.0 / (d1 + eps);
+        const double inv_d2 = 1.0 / (d2 + eps);
+        const double sum_inv_d = inv_d1 + inv_d2;
+        const double w1 = inv_d1 / sum_inv_d;
+        const double w2 = inv_d2 / sum_inv_d;
+
+        const double s1 = cell_center_attr[neighbor_cells[0] * total_layer + layer];
+        const double s2 = cell_center_attr[neighbor_cells[1] * total_layer + layer];
+
+        double value = w1 * s1 + w2 * s2;
+        if (value < 0.0) {
+            value = 0.0;
+        }
+        cell_vertex_attr[tid] = value;
+        return;
+    }
+
+    // Normal case: 3 neighbors - standard barycentric interpolation
     const vec3 p = vertex_coord[vertex_idx];
     const vec3 p1 = cell_coord[neighbor_cells[0]];
     const vec3 p2 = cell_coord[neighbor_cells[1]];
@@ -333,27 +403,28 @@ __global__ void KernelCalcCellVertexVelocity(
 
     constexpr int kNeighborNum = 3;
     size_t neighbor_cells[kNeighborNum] = {0, 0, 0};
-    bool boundary = false;
+    int valid_count = 0;
 
+    // Collect valid neighbors
     for (int i = 0; i < kNeighborNum; ++i) {
         const size_t raw_id = cells_on_vertex[vertex_idx * kNeighborNum + i];
         if (raw_id == 0) {
-            boundary = true;
             continue;
         }
         const size_t cid = raw_id - 1;
         if (cid >= cells_size) {
-            boundary = true;
             continue;
         }
-        neighbor_cells[i] = cid;
+        neighbor_cells[valid_count++] = cid;
     }
 
-    if (boundary) {
+    // Velocity at boundary: no-slip condition (velocity = 0)
+    if (valid_count < 3) {
         cell_vertex_velocity[tid] = make_double3(0.0, 0.0, 0.0);
         return;
     }
 
+    // Normal case: 3 neighbors - standard barycentric interpolation
     const vec3 p = vertex_coord[vertex_idx];
     const vec3 p1 = cell_coord[neighbor_cells[0]];
     const vec3 p2 = cell_coord[neighbor_cells[1]];
@@ -392,27 +463,28 @@ __global__ void KernelCalcCellVertexVertVelocity(
 
     constexpr int kNeighborNum = 3;
     size_t neighbor_cells[kNeighborNum] = {0, 0, 0};
-    bool boundary = false;
+    int valid_count = 0;
 
+    // Collect valid neighbors
     for (int i = 0; i < kNeighborNum; ++i) {
         const size_t raw_id = cells_on_vertex[vertex_idx * kNeighborNum + i];
         if (raw_id == 0) {
-            boundary = true;
             continue;
         }
         const size_t cid = raw_id - 1;
         if (cid >= cells_size) {
-            boundary = true;
             continue;
         }
-        neighbor_cells[i] = cid;
+        neighbor_cells[valid_count++] = cid;
     }
 
-    if (boundary) {
+    // Vertical velocity at boundary: no-slip condition (velocity = 0)
+    if (valid_count < 3) {
         cell_vertex_vert_velocity[tid] = 0.0;
         return;
     }
 
+    // Normal case: 3 neighbors - standard barycentric interpolation
     const vec3 p = vertex_coord[vertex_idx];
     const vec3 p1 = cell_coord[neighbor_cells[0]];
     const vec3 p2 = cell_coord[neighbor_cells[1]];

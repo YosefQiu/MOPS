@@ -1,54 +1,137 @@
 from pyMOPSAPI import *
+import os
 
-def example():
-    """
-    Example: Regridding at fixed latitude.
+def example_single_latitude():
+    """Example: Regrid at a single fixed latitude"""
+    yaml_path = "/pscratch/sd/q/qiuyf/MOPS_Tutorial/test_ab_climatology.yaml"
 
-    This mirrors the functionality of tutorial/reGrid.cpp.
-    It creates a longitude-depth cross-section at a fixed latitude.
-    """
-    yaml_path = "/pscratch/sd/q/qiuyf/MOPS_Tutorial/bmoorema.yaml"
-
-    # Initialize ReGrid
     rg = MOPSReGrid(yaml_path).init(
         device="gpu",
-        time_stamp="0001-01-01",
+        time_stamp="0002-01-01",
         time_step=0,
         add_temperature=True,
         add_salinity=True,
     )
 
-    # Run regridding at fixed latitude
-    # This creates a longitude-depth cross-section
+    # Run regridding at latitude 45°N
     image = rg.run(
-        width=720,          # 360 * 2 (longitude bins)
-        height=100,         # depth bins
+        width=360 * 2,
+        lat_range=(-90.0, 90.0),
         lon_range=(-180.0, 180.0),
-        depth_range=(0.0, 5000.0),  # You can adjust based on your data
-        fixed_latitude=45.0,         # Latitude of the cross-section
+        fixed_latitude=45.0,
         time_step=0,
     )
 
-    print(f"Regridded image shape: {image.shape}")
-    print(f"Image channels: [E, N, Vertical, Magnitude]")
+    print(f"Got regridded image shape: {np.asarray(image).shape}")
 
     # Save outputs
-    # 1. Save as binary (matches C++ tutorial output format)
-    MOPSReGrid.save_to_binary(image, "regrid_fixed_latitude.bin")
+    MOPSReGrid.save_colormap_pngs(
+        [image],
+        "regrid_single_outputs",
+        prefix="lat_45N",
+        channels=(0, 1, 2, 3),
+        cmap_name="coolwarm",
+        save_colorbar=True,
+    )
 
-    # 2. Save individual channels as PNG
-    MOPSReGrid.save_to_png(image, "regrid_E.png", channel=0, cmap_name="coolwarm")
-    MOPSReGrid.save_to_png(image, "regrid_N.png", channel=1, cmap_name="coolwarm")
-    MOPSReGrid.save_to_png(image, "regrid_Vertical.png", channel=2, cmap_name="coolwarm")
-    MOPSReGrid.save_to_png(image, "regrid_Magnitude.png", channel=3, cmap_name="viridis")
 
-    print("\nSaved outputs:")
-    print("  - regrid_fixed_latitude.bin (binary)")
-    print("  - regrid_E.png (East component)")
-    print("  - regrid_N.png (North component)")
-    print("  - regrid_Vertical.png (Vertical component)")
-    print("  - regrid_Magnitude.png (Velocity magnitude)")
+def example_multiple_latitudes():
+    """Example: Regrid across multiple latitudes (Pacific focus)"""
+    yaml_path = "/pscratch/sd/q/qiuyf/MOPS_Tutorial/test_ab_climatology.yaml"
+
+    rg = MOPSReGrid(yaml_path).init(
+        device="gpu",
+        time_stamp="0002-01-01",
+        time_step=0,
+        add_temperature=True,
+        add_salinity=True,
+    )
+
+    output_dir = "regrid_pacific_outputs"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Loop through latitudes with 2-degree increments
+    # For Pacific focus: -60 to 60, or full range: -90 to 90
+    for lat in range(-90, 91, 2):
+        print(f"\n=== Processing latitude {lat}° ===")
+
+        image = rg.run(
+            width=360 * 2,
+            lat_range=(-90.0, 90.0),
+            lon_range=(-180.0, 180.0),
+            fixed_latitude=float(lat),
+            time_step=0,
+        )
+
+        # Create latitude-specific prefix
+        lat_str = f"N{lat:03d}" if lat >= 0 else f"S{abs(lat):03d}"
+
+        # Save with latitude in filename
+        MOPSReGrid.save_colormap_pngs(
+            [image],
+            output_dir,
+            prefix=f"lat_{lat_str}",
+            channels=(0, 1, 2, 3),
+            cmap_name="coolwarm",
+            save_colorbar=False,  # Skip colorbar for batch processing
+        )
+
+        # Save as binary for later use
+        MOPSReGrid.save_binary(
+            [image],
+            output_dir,
+            prefix=f"lat_{lat_str}",
+        )
+
+    print(f"\n=== All latitudes processed! Files saved to {output_dir} ===")
+
+
+def example_pacific_focus():
+    """Example: Focus on Pacific latitudes only"""
+    yaml_path = "/pscratch/sd/q/qiuyf/MOPS_Tutorial/test_ab_climatology.yaml"
+
+    rg = MOPSReGrid(yaml_path).init(
+        device="gpu",
+        time_stamp="0002-01-01",
+        time_step=0,
+        add_temperature=True,
+        add_salinity=True,
+    )
+
+    output_dir = "regrid_pacific_focus"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Pacific focus: -60 to 60 latitude
+    pacific_lats = np.arange(-60, 62, 2)  # Every 2 degrees
+
+    for lat in pacific_lats:
+        print(f"Processing latitude {lat}°")
+
+        image = rg.run(
+            width=360 * 2,
+            lat_range=(-90.0, 90.0),
+            lon_range=(-180.0, 180.0),
+            fixed_latitude=float(lat),
+            time_step=0,
+        )
+
+        lat_str = f"N{int(lat):03d}" if lat >= 0 else f"S{int(abs(lat)):03d}"
+
+        # Save PNG and binary
+        MOPSReGrid.save_colormap_pngs(
+            [image],
+            output_dir,
+            prefix=f"lat_{lat_str}",
+            channels=(0, 1, 2, 3),
+            cmap_name="coolwarm",
+        )
+
+    print(f"Done! {len(pacific_lats)} latitudes processed.")
 
 
 if __name__ == "__main__":
-    example()
+    # Choose one of the examples:
+
+    # example_single_latitude()
+    example_multiple_latitudes()
+    # example_pacific_focus()

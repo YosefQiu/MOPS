@@ -24,6 +24,9 @@ netcdf-c
 build*
 .cache
 .cache/*
+.claude
+.claude/*
+TestData
 hdf5
 zlib
 tutorial/.data/

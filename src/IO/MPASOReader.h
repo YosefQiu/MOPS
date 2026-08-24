@@ -6,6 +6,14 @@
 
 namespace MOPS
 {
+	// Structure for storing particle position with depth
+	struct LatLonDepth
+	{
+		double lat;    // Latitude in degrees
+		double lon;    // Longitude in degrees
+		double depth;  // Depth in meters (positive downward)
+	};
+
 	class MPASOReader
 	{
 	public:
@@ -91,6 +99,7 @@ namespace MOPS
         static Ptr readMPASO(const std::string& yaml_path, int timestep);
 		static Ptr readGridData(const std::string& yaml_path);
 		static Ptr readSolData(const std::string& yaml_path, const std::string& data_name = "", const int& timestep = 0);
+		static std::vector<LatLonDepth> loadParticleSeeds(const char* filepath, size_t& num_particles);
         void appendSolData(MPASOReader* reader, const std::string& yaml_path, const int& timestep);
 		void readData(const char* nc_filename); 
 		void readSol(const char* nc_filename);

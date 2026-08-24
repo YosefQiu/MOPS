@@ -409,7 +409,31 @@ void MPASOSolution::addAttribute(std::string name, AttributeFormat type)
         Debug("[MPASOSolution]::kVec3 is not supported temporarily");
     }
 
-   
+    // Clean invalid values for temperature and salinity
+    if (name == "temperature" || name == "salinity")
+    {
+        const double INVALID_THRESHOLD = -1e30;
+
+        // Clean mDoubleAttributes
+        if (mDoubleAttributes.count(name))
+        {
+            auto& data = mDoubleAttributes[name];
+            for (auto& val : data)
+            {
+                if (val <= INVALID_THRESHOLD) val = 0.0;
+            }
+        }
+
+        // Clean mFloatAttributes
+        if (mFloatAttributes.count(name))
+        {
+            auto& data = mFloatAttributes[name];
+            for (auto& val : data)
+            {
+                if (val <= static_cast<float>(INVALID_THRESHOLD)) val = 0.0f;
+            }
+        }
+    }
 }
 
 void MPASOSolution::getCellVelocity(const size_t cell_id, const size_t level, std::vector<vec3>& cell_on_velocity, vec3& vel)

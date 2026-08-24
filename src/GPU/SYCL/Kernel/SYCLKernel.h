@@ -45,5 +45,68 @@ namespace MOPS
         static vec3 CalcRotationAxis(const vec3& position, const vec3& velocity);
         SYCL_EXTERNAL
         static vec3 CalcPositionAfterRotation(const vec3& position, const vec3& axis, double theta_rad);
+
+        // Advanced pathline helper functions
+        SYCL_EXTERNAL
+        static vec3 AdvectOnSphereSYCL(const vec3& pos, const vec3& vel, double dt);
+
+        SYCL_EXTERNAL
+        static int FindContainingCellInCurrentOrNeighborsSYCL(
+            const vec3& pos,
+            int current_cell_id,
+            int max_edge,
+            sycl::accessor<size_t, 1, sycl::access::mode::read> acc_numberVertexOnCell_buf,
+            sycl::accessor<size_t, 1, sycl::access::mode::read> acc_cellsOnCell_buf,
+            sycl::accessor<size_t, 1, sycl::access::mode::read> acc_verticesOnCell_buf,
+            sycl::accessor<vec3, 1, sycl::access::mode::read> acc_vertexCoord_buf);
+
+        SYCL_EXTERNAL
+        static void FindNearestCellEdgeSYCL(
+            const vec3& pos,
+            int cell_id,
+            int max_edge,
+            sycl::accessor<size_t, 1, sycl::access::mode::read> acc_numberVertexOnCell_buf,
+            sycl::accessor<size_t, 1, sycl::access::mode::read> acc_verticesOnCell_buf,
+            sycl::accessor<vec3, 1, sycl::access::mode::read> acc_vertexCoord_buf,
+            int& edge_va_idx,
+            int& edge_vb_idx);
+
+        SYCL_EXTERNAL
+        static vec3 ProjectVelocityOntoEdgeSYCL(
+            const vec3& vel,
+            const vec3& pos,
+            const vec3& va,
+            const vec3& vb);
+
+        SYCL_EXTERNAL
+        static vec3 GenerateRandomTangentVelocitySYCL(
+            const vec3& pos,
+            int particle_id,
+            int timestep,
+            double magnitude,
+            int attempt);
+
+        SYCL_EXTERNAL
+        static double CalcZTopAtLevel0SYCL(
+            const vec3& pos,
+            int cell_id,
+            int max_edge,
+            int vertex_size,
+            sycl::accessor<size_t, 1, sycl::access::mode::read> acc_numberVertexOnCell_buf,
+            sycl::accessor<size_t, 1, sycl::access::mode::read> acc_verticesOnCell_buf,
+            sycl::accessor<vec3, 1, sycl::access::mode::read> acc_vertexCoord_buf,
+            sycl::accessor<double, 1, sycl::access::mode::read> acc_cellVertexZTop_buf);
+
+        SYCL_EXTERNAL
+        static double CalcZTopAtBottomSYCL(
+            const vec3& pos,
+            int cell_id,
+            int max_edge,
+            int vertex_size,
+            int ztop_layer,
+            sycl::accessor<size_t, 1, sycl::access::mode::read> acc_numberVertexOnCell_buf,
+            sycl::accessor<size_t, 1, sycl::access::mode::read> acc_verticesOnCell_buf,
+            sycl::accessor<vec3, 1, sycl::access::mode::read> acc_vertexCoord_buf,
+            sycl::accessor<double, 1, sycl::access::mode::read> acc_cellVertexZTop_buf);
     };
 }

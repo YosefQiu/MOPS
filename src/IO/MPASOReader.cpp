@@ -2,6 +2,7 @@
 #include "MPASOReader.h"
 #include "Utils/Utils.hpp"
 #include "Utils/Timer.hpp"
+#include "Utils/npy.hpp"
 #include <iostream>
 #include <memory>
 #include <string>
@@ -566,4 +567,38 @@ void MPASOReader::readFromBlock_IntBasedK(const std::string& filename, std::vect
     file.close();
     K = k;
     Debug("[MPASOReader]::Loaded %s with %d entries and %d components each", filename.c_str(), dataSize, k);
+}
+std::vector<MOPS::LatLonDepth> MOPS::MPASOReader::loadParticleSeeds(const char* filepath, size_t& num_particles)
+{
+    std::vector<LatLonDepth> particles;
+
+    try {
+        auto npy_data = npy::read_npy<double>(filepath);
+
+        // Verify 2D array with 3 columns
+        if (npy_data.shape.size() != 2 || npy_data.shape[1] != 3) {
+            std::cerr << "[ERROR] Expected 2D array shape (particles, 3), got (";
+            for (size_t i = 0; i < npy_data.shape.size(); i++) {
+                std::cerr << npy_data.shape[i];
+                if (i < npy_data.shape.size() - 1) std::cerr << ", ";
+            }
+            std::cerr << ")" << std::endl;
+            return particles;
+        }
+
+        num_particles = npy_data.shape[0];
+        particles.resize(num_particles);
+
+        for (size_t p = 0; p < num_particles; p++) {
+            size_t base_idx = p * 3;
+            particles[p].lat = npy_data.data[base_idx + 0];
+            particles[p].lon = npy_data.data[base_idx + 1];
+            particles[p].depth = npy_data.data[base_idx + 2];
+        }
+
+    } catch (const std::exception& e) {
+        std::cerr << "[ERROR] Failed to read .npy file: " << e.what() << std::endl;
+    }
+
+    return particles;
 }

@@ -278,6 +278,7 @@ RuntimeContext CreateRuntimeContext(sycl::queue& q)
 		
 		std::vector<int> cell_id_vec;
 		mpasoField->calcInWhichCells(sample_points, cell_id_vec);
+
 		
 		RuntimeContext runtime_ctx = CreateRuntimeContext(mSYCLQueue);
 		auto lines_i = MPASOVisualizer::PathLine(mpasoField.get(), sample_points, config, cell_id_vec, runtime_ctx);

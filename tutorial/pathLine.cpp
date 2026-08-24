@@ -1,159 +1,147 @@
-﻿#include "ggl.h"
+﻿/**
+ * ============================================================================
+ * testAbPts.cpp - MOPS Pathline Simulation Tutorial
+ * ============================================================================
+ *
+ * CONFIGURATION GUIDE - TWO MODES
+ * ============================================================================
+ *
+ * ┌─── Mode 1: Manual Particle [DEFAULT] ──────────────────────────────────┐
+ * │  Manually specify single particle position and depth                   │
+ * │                                                                         │
+ * │  CONFIG:                                                                │
+ * │    Keep commented: // #define USE_PARTICLE_FILE (line 62)              │
+ * │                                                                         │
+ * │  PARAMETERS (lines 70-72):                                              │
+ * │    MANUAL_PARTICLE_LAT:   Latitude (degrees)                           │
+ * │    MANUAL_PARTICLE_LON:   Longitude (degrees)                          │
+ * │    MANUAL_PARTICLE_DEPTH: Depth (meters, positive downward)            │
+ * │                                                                         │
+ * │  CURRENT: 1 particle at 45°N, 160°W, 2m depth                          │
+ * └─────────────────────────────────────────────────────────────────────────┘
+ *
+ * ┌─── Mode 2: Load from NPY File ──────────────────────────────────────────┐
+ * │  Load particles from 2D .npy file with lat/lon/depth                   │
+ * │                                                                         │
+ * │  CONFIG:                                                                │
+ * │    Uncomment: #define USE_PARTICLE_FILE (line 62)                      │
+ * │                                                                         │
+ * │  PARAMETERS:                                                            │
+ * │    PARTICLE_FILE_PATH:     .npy file path (line 63)                    │
+ * │    MAX_PARTICLES_TO_LOAD:  Limit particle count (line 64)              │
+ * │                                                                         │
+ * │  NPY FORMAT: 2D array (num_particles, 3)                               │
+ * │              Each row: [latitude, longitude, depth]                    │
+ * │              Depth values from file are used directly                  │
+ * │                                                                         │
+ * │  EXAMPLE: Load up to 5000 particles from seeds file                    │
+ * └─────────────────────────────────────────────────────────────────────────┘
+ *
+ * ============================================================================
+ */
+
+#include "ggl.h"
 #include "api/MOPS.h"
 #include "Utils/cxxopts.hpp"
 #include "Utils/Utils.hpp"
 #include "Utils/YamlGen.hpp"
+#include "Utils/GeoConverter.hpp"
 #include "IO/VTKFileManager.hpp"
 #include "IO/MPASOReader.h"
 
+
 using namespace MOPS;
 
-// ============================================================================
-// Depth Mode Configuration
-// ============================================================================
-// Define USE_PER_PARTICLE_DEPTH to enable per-particle depth tracking.
-// When defined: each particle uses its own depth extracted from XYZ coordinates.
-// When NOT defined: all particles use the same fixed_depth value.
-// ============================================================================
-#define USE_PER_PARTICLE_DEPTH  // Comment out this line for uniform depth mode
-
-
-
-struct LatLonDepth {
-    double lat;    // degrees
-    double lon;    // degrees
-    double depth;  // meters (positive downward)
-};
-
-
-// helper functions
-LatLonDepth xyz_to_lat_lon_depth(double x, double y, double z)
-{
-	constexpr double EARTH_RADIUS2 = 6371000.0; // meters
-    LatLonDepth out;
-    out.lon = std::atan2(y, x) * 180.0 / M_PI;
-    double r = std::sqrt(x*x + y*y + z*z);
-    out.lat = std::asin(z / r) * 180.0 / M_PI;
-    out.depth = EARTH_RADIUS2 - r;
-
-    return out;
-}
-
-CartesianCoord lat_lon_depth_to_xyz(double lat_deg,
-                                    double lon_deg,
-                                    double depth)
-{
-	constexpr double EARTH_RADIUS2 = 6371000.0; // meters
-    CartesianCoord out;
-    double r = EARTH_RADIUS2 - depth;
-    double lat = lat_deg * M_PI / 180.0;
-    double lon = lon_deg * M_PI / 180.0;
-    out.x() = r * std::cos(lat) * std::cos(lon);
-    out.y() = r * std::cos(lat) * std::sin(lon);
-    out.z() = r * std::sin(lat);
-    return out;
-}
-
-CartesianCoord make_same_lat_depth_diff_lon(const CartesianCoord& p,
-                                            double delta_lon_deg)
-{
-    // 1. XYZ → lat/lon/depth
-    auto lld = xyz_to_lat_lon_depth(p.x(), p.y(), p.z());
-
-    // 2. change lon
-    lld.lon += delta_lon_deg;
-
-    if (lld.lon > 180.0)  lld.lon -= 360.0;
-    if (lld.lon < -180.0) lld.lon += 360.0;
-
-    // 3. to xyz
-    return lat_lon_depth_to_xyz(lld.lat, lld.lon, lld.depth);
-}
-
-int total_particles = 0;
 std::vector<CartesianCoord> lastPts_vec;
-std::vector<float> lastDepths_vec;  
-float fixed_depth = 10.261f;
+std::vector<float> lastDepths_vec;
 
 // ============================================================================
-// Per-Particle Depth Configuration (only used when USE_PER_PARTICLE_DEPTH is defined)
+// Particle Input Configuration
 // ============================================================================
-// Define the depth range for particles. Depths will be linearly distributed.
-float depth_min = 10.0f;    // Minimum depth (meters)
-float depth_max = 500.0f;   // Maximum depth (meters)
-// ============================================================================
+// Define USE_PARTICLE_FILE to load particles from a .npy file instead of generating them
+// #define USE_PARTICLE_FILE  // COMMENTED OUT: Using manual particle setup instead
+const char* PARTICLE_FILE_PATH = "/pscratch/sd/q/qiuyf/MOPS/TestData/seeds_45N_negative_random_0_005Sv_0.npy";
+const int MAX_PARTICLES_TO_LOAD = 10;  // Start with 1000 particles for debugging
 
-void tutorial_pathLine(const std::string name_prefix, float fixed_depth, bool isFirstPts, int day_gap)
+
+// ============================================================================
+// Manual Particle Configuration
+// ============================================================================
+const double MANUAL_PARTICLE_LAT = 45.0;  // Latitude (degrees)
+const double MANUAL_PARTICLE_LON = -160.0;  // Longitude (degrees)
+const float MANUAL_PARTICLE_DEPTH = 2.0f;   // Depth (meters)
+
+// ============================================================================
+// Simulation Configuration
+// ============================================================================
+const char* YAML_CONFIG_PATH = "/pscratch/sd/q/qiuyf/MOPS_Tutorial/test_ab_climatology.yaml";
+const int TIMESTEP = 0;
+
+// Time range configuration
+const int START_YEAR = 10;
+const int START_MONTH = 12;
+const int END_YEAR = 10;
+const int END_MONTH = 10;
+
+// Trajectory settings
+const MOPS::CalcDirection TRAJECTORY_DIRECTION = MOPS::CalcDirection::kBackward;
+const MOPS::CalcMethodType INTEGRATION_METHOD = MOPS::CalcMethodType::kRK4;
+const int DELTA_T_MINUTES = 10;        // Time step in minutes
+const int RECORD_INTERVAL_HOURS = 6;   // Output interval in hours
+
+void tutorial_pathLine(const std::string name_prefix, bool isFirstPts, int day_gap)
 {
 	std::vector<CartesianCoord> sample_points;
 	std::vector<float> sample_depths;  
 	
 	if (isFirstPts)
 	{
-		Debug("== generate sample points ==");
+#ifdef USE_PARTICLE_FILE
 		{
-			MOPS::SamplingSettings* sampling_conf = new MOPS::SamplingSettings();
-			sampling_conf->setSampleRange(vec2i{400, 400});
-			sampling_conf->setGeoBox(vec2{-90.0, 90.0},  vec2{-180.0, 180.0});
-			sampling_conf->atCellCenter(false);
-			sampling_conf->setDepth(fixed_depth);
-			MOPS::MOPS_GenerateSamplePoints(sampling_conf, sample_points);
-			delete sampling_conf;
-			sampling_conf = nullptr;
+			// Load particle seeds from NPY file
+			size_t num_particles = 0;
+			auto particles = MPASOReader::loadParticleSeeds(PARTICLE_FILE_PATH, num_particles);
+			if (particles.empty()) {
+				std::cerr << "[ERROR] No particles loaded from file!" << std::endl;
+				exit(-1);
+			}
+
+			// Limit number of particles to avoid memory issues
+			size_t particles_to_load = std::min(num_particles, static_cast<size_t>(MAX_PARTICLES_TO_LOAD));
+
+			sample_points.resize(particles_to_load);
+			sample_depths.resize(particles_to_load);
+
+			// Use lat/lon/depth from NPY file directly
+			for (size_t p = 0; p < particles_to_load; p++) {
+				auto& lld = particles[p];
+				sample_points[p] = GeoConverter::convertLatLonDepthToXYZ(lld.lat, lld.lon, lld.depth);
+				sample_depths[p] = static_cast<float>(lld.depth);
+			}
 		}
-		total_particles = static_cast<int>(sample_points.size());
-		
-#ifdef USE_PER_PARTICLE_DEPTH
-		// Per-particle depth mode: assign different depths to particles
-		// The sample_points are generated at fixed_depth, but we will override
-		// the depth used in GPU kernel with linearly distributed depths.
-		sample_depths.resize(sample_points.size());
-		for (size_t i = 0; i < sample_points.size(); i++) {
-			// Linearly interpolate depth from depth_min to depth_max
-			float t = (sample_points.size() > 1) 
-			        ? static_cast<float>(i) / static_cast<float>(sample_points.size() - 1)
-			        : 0.0f;
-			sample_depths[i] = depth_min + t * (depth_max - depth_min);
-			
-			// Also update the XYZ coordinates to match the new depth
-			auto lld = xyz_to_lat_lon_depth(sample_points[i].x(), sample_points[i].y(), sample_points[i].z());
-			sample_points[i] = lat_lon_depth_to_xyz(lld.lat, lld.lon, sample_depths[i]);
-		}
-		Debug("[PER-PARTICLE DEPTH] Assigned depths from %.2f to %.2f meters (%zu particles)", 
-			depth_min, depth_max, sample_points.size());
 #else
-		// Uniform depth mode: all particles use fixed_depth
-		Debug("[UNIFORM DEPTH] All particles using depth: %.2f meters", fixed_depth);
+		{
+			// Create manual particle with specified position and depth
+			sample_points.resize(1);
+			sample_depths.resize(1);
+
+			sample_points[0] = GeoConverter::convertLatLonDepthToXYZ(MANUAL_PARTICLE_LAT, MANUAL_PARTICLE_LON, MANUAL_PARTICLE_DEPTH);
+			sample_depths[0] = MANUAL_PARTICLE_DEPTH;
+		}
 #endif
-		// sample_points.clear();
-		// sample_points.resize(1);
-        // sample_points[0] = CartesianCoord{ 4472513.01895255, -293143.99074839, 4521395.00861939}; 
-		// for (auto i = 1; i < 15; i++)
-		// {
-		// 	sample_points[i] = make_same_lat_depth_diff_lon(sample_points[0], 2.0 * i);
-		// }
 	}
 	else
 	{
-		Debug("== load sample points from memory ==");
 		{
 			if (lastPts_vec.size() != 0)
 			{
 				sample_points.resize(lastPts_vec.size());
-#ifdef USE_PER_PARTICLE_DEPTH
 				sample_depths.resize(lastPts_vec.size());
-#endif
 				for (auto idx = 0; idx < lastPts_vec.size(); idx++)
 				{
 					sample_points[idx] = CartesianCoord{lastPts_vec[idx].x(), lastPts_vec[idx].y(), lastPts_vec[idx].z()};
-#ifdef USE_PER_PARTICLE_DEPTH
-					// Per-particle depth: restore from saved depths
 					sample_depths[idx] = lastDepths_vec[idx];
-#endif
 				}
-#ifdef USE_PER_PARTICLE_DEPTH
-				Debug("[PER-PARTICLE DEPTH] Restored %zu particles with saved depths", sample_points.size());
-#endif
 			}
 			else
 			{
@@ -164,27 +152,16 @@ void tutorial_pathLine(const std::string name_prefix, float fixed_depth, bool is
 	}
 	
 	MOPS::TrajectorySettings* traj_conf = new MOPS::TrajectorySettings;
-	traj_conf->directionType = MOPS::CalcDirection::kForward;
-	traj_conf->methodType = MOPS::CalcMethodType::kRK4;
-	traj_conf->depth = fixed_depth;  // Used in uniform depth mode or as fallback
-#ifdef USE_PER_PARTICLE_DEPTH
+	traj_conf->directionType = TRAJECTORY_DIRECTION;
+	traj_conf->methodType = INTEGRATION_METHOD;
 	traj_conf->particle_depths = sample_depths;  // Per-particle depths
-#endif
-	traj_conf->deltaT = ONE_MINUTE * 10;			
+	traj_conf->deltaT = ONE_MINUTE * DELTA_T_MINUTES;
 	traj_conf->simulationDuration = std::abs(day_gap);
-	traj_conf->recordT = ONE_HOUR * 6;
+	traj_conf->recordT = ONE_HOUR * RECORD_INTERVAL_HOURS;
     auto direction_str = (traj_conf->directionType == MOPS::CalcDirection::kForward) ? "FORWARD" : "BACKWARD";
 
 	auto tiltle = name_prefix + "_";
 	traj_conf->fileName = tiltle + direction_str;
-	
-	Debug("== multiple timesteps [pathline] ==");
-#ifdef USE_PER_PARTICLE_DEPTH
-	Debug("[MODE: PER-PARTICLE DEPTH] particles: %zu, depths: %zu", sample_points.size(), sample_depths.size());
-#else
-	Debug("[MODE: UNIFORM DEPTH] particles: %zu, depth: %.2f meters", sample_points.size(), fixed_depth);
-#endif
-    
 
 	// GPU Kernel
 	std::vector<MOPS::TrajectoryLine> lines;
@@ -201,9 +178,7 @@ void tutorial_pathLine(const std::string name_prefix, float fixed_depth, bool is
 	// save last pts to memory (and depths for per-particle mode)
 	{
 		lastPts_vec.clear();
-#ifdef USE_PER_PARTICLE_DEPTH
 		lastDepths_vec.clear();
-#endif
 		std::vector<vec3> last_pts;
 		for (auto idx = 0; idx < lines.size(); idx++) 
 		{
@@ -227,12 +202,11 @@ void tutorial_pathLine(const std::string name_prefix, float fixed_depth, bool is
 		for (size_t i = 0; i < last_pts.size(); i++) {
 			const auto& p = last_pts[i];
 			lastPts_vec.push_back(CartesianCoord{p.x(), p.y(), p.z()});
-#ifdef USE_PER_PARTICLE_DEPTH
-			// Save evolved depth from the last valid XYZ point (depth positive downward).
+
+			// Save evolved depth from the last valid XYZ point (depth positive downward)
 			const double earthRadius = 6371010.0;
 			double r = std::sqrt(p.x() * p.x() + p.y() * p.y() + p.z() * p.z());
 			lastDepths_vec.push_back(static_cast<float>(earthRadius - r));
-#endif
 		}
 	}
 	
@@ -243,13 +217,12 @@ void tutorial_pathLine(const std::string name_prefix, float fixed_depth, bool is
 
 void IO()
 {
-    const char* yaml_path = "/pscratch/sd/q/qiuyf/MOPS_Tutorial/test_ab_climatology.yaml";
-	int timestep = 0;
 	auto mpasoGrid = std::make_shared<MOPS::MPASOGrid>();
     auto solFront = std::make_shared<MOPS::MPASOSolution>();
 	auto solBack = std::make_shared<MOPS::MPASOSolution>();
 
-    auto pairs = MOPS_IO::make_forward_month_pairs(01, 1, 03, 12);
+    // Generate month pairs for simulation period
+	auto year_pairs = MOPS_IO::make_backward_month_pairs(START_YEAR, START_MONTH, END_YEAR, END_MONTH);
     
 	{
 		#if defined(MOPS_USE_TBB) && (MOPS_USE_TBB == 1)
@@ -261,35 +234,33 @@ void IO()
 
 	// Use new MOPS timing system
 	{
-		mpasoGrid->initGrid(MOPS::MPASOReader::readGridData(yaml_path).get());
+		mpasoGrid->initGrid(MOPS::MPASOReader::readGridData(YAML_CONFIG_PATH).get());
 	}
 
 	bool isFirst = true;
 
     
 
-    for (const auto& p : pairs)
+    for (const auto& p : year_pairs)
     {
-        Debug("pair: %s to %s", p.first.c_str(), p.second.c_str());
 		
         {
-            solFront->initSolution(MOPS::MPASOReader::readSolData(yaml_path, p.first, timestep).get());
-            solBack->initSolution(MOPS::MPASOReader::readSolData(yaml_path, p.second, timestep).get());
+            solFront->initSolution(MOPS::MPASOReader::readSolData(YAML_CONFIG_PATH, p.first, TIMESTEP).get());
+            solBack->initSolution(MOPS::MPASOReader::readSolData(YAML_CONFIG_PATH, p.second, TIMESTEP).get());
         }
-        
+
         {
             solFront->addAttribute("temperature", MOPS::AttributeFormat::kFloat);
             solFront->addAttribute("salinity", MOPS::AttributeFormat::kFloat);
             solBack->addAttribute("temperature", MOPS::AttributeFormat::kFloat);
             solBack->addAttribute("salinity", MOPS::AttributeFormat::kFloat);
         }
-        
+
         auto t1 =solFront->getTimeStamp();
         auto t2 = solBack->getTimeStamp();
 
 		auto fileNamePrefix = "PathLine_" + std::to_string(toIntYMD(p.first)) + "_to_" + std::to_string(toIntYMD(p.second));
-        Debug("%s %s", p.first.c_str(), p.second.c_str());
-        
+
         {
             MOPS::MOPS_Begin();
             MOPS::MOPS_AddGridMesh(mpasoGrid);
@@ -301,8 +272,8 @@ void IO()
         {
             MOPS::MOPS_ActiveAttribute(solFront->getID(), solBack->getID());
         }
-        
-        tutorial_pathLine(fileNamePrefix, fixed_depth, isFirst, getTimeGapinSecond(t2.c_str(), t1.c_str()));
+
+        tutorial_pathLine(fileNamePrefix, isFirst, getTimeGapinSecond(t2.c_str(), t1.c_str()));
         isFirst = false;
     }
 
@@ -312,7 +283,7 @@ int main()
 {
 	// Reset timing before starting (optional, starts fresh)
 	MOPS::MOPS_ResetTiming();
-	
+
     IO();
 	
 	// Print timing summary - shows time spent in each category

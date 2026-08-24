@@ -319,6 +319,7 @@ namespace MOPS
 			vtkSmartPointer<vtkPoints> all_points = vtkSmartPointer<vtkPoints>::New();
 			vtkSmartPointer<vtkCellArray> all_lines = vtkSmartPointer<vtkCellArray>::New();
 
+			// Scalar attributes
 			auto tempArr   = vtkSmartPointer<vtkDoubleArray>::New();
 			tempArr->SetName("temperature");
 			tempArr->SetNumberOfComponents(1);
@@ -330,6 +331,15 @@ namespace MOPS
 			auto velMagArr = vtkSmartPointer<vtkDoubleArray>::New();
 			velMagArr->SetName("velocity_mag");
 			velMagArr->SetNumberOfComponents(1);
+
+			auto depthArr  = vtkSmartPointer<vtkDoubleArray>::New();
+			depthArr->SetName("depth");
+			depthArr->SetNumberOfComponents(1);
+
+			// Vector attributes
+			auto velVecArr = vtkSmartPointer<vtkDoubleArray>::New();
+			velVecArr->SetName("velocity");
+			velVecArr->SetNumberOfComponents(3);  // 3D vector (vx, vy, vz)
 
 			const double double_NaN = std::numeric_limits<double>::quiet_NaN();
 
@@ -376,17 +386,22 @@ namespace MOPS
 					vtkIdType pid = all_points->InsertNextPoint(longitude, latitude, altitude);
 					polyline->GetPointIds()->InsertNextId(pid);
 
+					// Scalar attributes
 					tempArr->InsertNextValue(getTemp(idx));
 					salArr->InsertNextValue(getSal(idx));
+					depthArr->InsertNextValue(altitude);  // Depth (positive downward)
 
+					// Velocity attributes
 					double vx = 0.0, vy = 0.0, vz = 0.0;
 					if (idx < nVel) {
-						vx = traj.velocity[idx].x(); // If it is a .x member, change to traj.velocity[idx].x
+						vx = traj.velocity[idx].x();
 						vy = traj.velocity[idx].y();
 						vz = traj.velocity[idx].z();
 					}
 					const double vmag = std::sqrt(vx*vx + vy*vy + vz*vz);
-					velMagArr->InsertNextValue(vmag);
+
+					velMagArr->InsertNextValue(vmag);           // Speed (scalar)
+					velVecArr->InsertNextTuple3(vx, vy, vz);    // Velocity vector (3D)
 
 					previousLongitude = longitude;
 					firstPoint = false;
@@ -403,9 +418,18 @@ namespace MOPS
 			vtkSmartPointer<vtkPolyData> polydata = vtkSmartPointer<vtkPolyData>::New();
 			polydata->SetPoints(all_points);
 			polydata->SetLines(all_lines);
+
+			// Add scalar attributes
 			polydata->GetPointData()->AddArray(tempArr);
 			polydata->GetPointData()->AddArray(salArr);
+			polydata->GetPointData()->AddArray(depthArr);
 			polydata->GetPointData()->AddArray(velMagArr);
+
+			// Add vector attributes
+			polydata->GetPointData()->AddArray(velVecArr);
+
+			// Set default scalar for coloring (ParaView will use this by default)
+			polydata->GetPointData()->SetActiveScalars("temperature");
 
 			// Write to file
 			vtkSmartPointer<vtkXMLPolyDataWriter> writer = vtkSmartPointer<vtkXMLPolyDataWriter>::New();

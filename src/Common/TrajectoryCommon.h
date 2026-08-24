@@ -176,8 +176,8 @@ inline std::vector<TrajectoryLine> FinalizeTrajectoryLinesWithAttrs(
             vec3 a = attrs[i];
             trajectory_lines[line_idx].points.push_back(p);
             trajectory_lines[line_idx].velocity.push_back(v);
-            trajectory_lines[line_idx].temperature.push_back(v.x());
-            trajectory_lines[line_idx].salinity.push_back(v.y());
+            trajectory_lines[line_idx].temperature.push_back(a.x());
+            trajectory_lines[line_idx].salinity.push_back(a.y());
 
             if (i == end_idx - 1 || i == total_points - 1) {
                 trajectory_lines[line_idx].lastPoint = p;

@@ -197,6 +197,52 @@ namespace MOPS
             degree.y() = radian.y() * (180.0 / M_PI);
         }
 
+        MOPS_HOST_DEVICE static inline CartesianCoord convertLatLonDepthToXYZ(double lat_deg, double lon_deg, double depth)
+        {
+            /*
+            *  Convert latitude, longitude, and depth to XYZ Cartesian coordinates
+            *  lat_deg: latitude in degrees
+            *  lon_deg: longitude in degrees
+            *  depth: depth below sea surface in meters (positive downward)
+            *  Returns: CartesianCoord (x, y, z) position
+            *  Earth radius: 6371000.0 meters
+            */
+
+            constexpr double earthRadiusMeters = 6371000.0;
+            CartesianCoord position;
+            double r = earthRadiusMeters - depth;
+            double lat = lat_deg * (M_PI / 180.0);
+            double lon = lon_deg * (M_PI / 180.0);
+
+            position.x() = r * MOPS::math::cos(lat) * MOPS::math::cos(lon);
+            position.y() = r * MOPS::math::cos(lat) * MOPS::math::sin(lon);
+            position.z() = r * MOPS::math::sin(lat);
+
+            return position;
+        }
+
+        MOPS_HOST_DEVICE static inline void convertXYZToLatLonDepth(const CartesianCoord& position, double& lat_deg, double& lon_deg, double& depth)
+        {
+            /*
+            *  Convert XYZ Cartesian coordinates to latitude, longitude, and depth
+            *  position: (x, y, z) Cartesian position
+            *  lat_deg: latitude in degrees (output)
+            *  lon_deg: longitude in degrees (output)
+            *  depth: depth below sea surface in meters, positive downward (output)
+            *  Earth radius: 6371000.0 meters
+            */
+
+            constexpr double earthRadiusMeters = 6371000.0;
+            double x = position.x();
+            double y = position.y();
+            double z = position.z();
+
+            lon_deg = MOPS::math::atan2(y, x) * (180.0 / M_PI);
+            double r = MOPS::math::sqrt(x * x + y * y + z * z);
+            lat_deg = MOPS::math::asin(z / r) * (180.0 / M_PI);
+            depth = earthRadiusMeters - r;
+        }
+
         MOPS_HOST_DEVICE static inline void convertXYZVelocityToENU(const CartesianCoord& xyzPoint, const vec3& xyzVel, double& Uzon, double& Umer)
         {
             double Rxy, Rxyz, slon, clon, slat, clat;

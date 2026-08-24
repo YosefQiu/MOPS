@@ -882,6 +882,112 @@ class MOPSReGrid:
         Image.fromarray(rgba_u8, mode="RGBA").save(filename)
         print(f"Saved PNG: {filename}")
 
+    @staticmethod
+    def save_binary(images: Sequence[np.ndarray], out_dir: str, prefix: str = "regrid"):
+        """Save multiple images as binary files"""
+        from pathlib import Path
+        out = Path(out_dir)
+        out.mkdir(parents=True, exist_ok=True)
+
+        for i, img in enumerate(images):
+            filename = out / f"{prefix}_{i}.bin"
+            MOPSReGrid.save_to_binary(img, str(filename))
+
+    @staticmethod
+    def save_colormap_pngs(
+        images: Sequence[np.ndarray],
+        out_dir: str,
+        prefix: str = "output",
+        channels: Iterable[int] = (0, 1, 2, 3),
+        cmap_name: str = "coolwarm",
+        save_colorbar: bool = True,
+    ):
+        """
+        Save multiple channels from multiple images as PNG files.
+
+        Parameters
+        ----------
+        images : Sequence[np.ndarray]
+            List of images, each with shape (H, W, 4)
+        out_dir : str
+            Output directory path
+        prefix : str
+            Filename prefix
+        channels : Iterable[int]
+            Which channels to save (0=E, 1=N, 2=Vertical, 3=Magnitude)
+        cmap_name : str
+            Matplotlib colormap name
+        save_colorbar : bool
+            Whether to save colorbar images
+        """
+        from pathlib import Path
+        from PIL import Image
+        import matplotlib.pyplot as plt
+        import matplotlib.cm as cm
+        import matplotlib.colors as mcolors
+        import matplotlib
+
+        out = Path(out_dir)
+        out.mkdir(parents=True, exist_ok=True)
+
+        cmap = matplotlib.colormaps.get_cmap(cmap_name)
+
+        for img_idx, img in enumerate(images):
+            arr = np.asarray(img)
+            if arr.ndim != 3:
+                raise ValueError(f"Expected image shape (H,W,C), got {arr.shape}")
+
+            for ch in channels:
+                if ch < 0 or ch >= arr.shape[2]:
+                    raise ValueError(f"Invalid channel={ch}, image has {arr.shape[2]} channels")
+
+                channel_data = arr[:, :, ch].astype(np.float64)
+                h, w = channel_data.shape
+
+                valid_mask = np.isfinite(channel_data)
+                if not np.any(valid_mask):
+                    rgba_u8 = np.zeros((h, w, 4), dtype=np.uint8)
+                    min_val, max_val = 0.0, 1.0
+                else:
+                    valid_vals = channel_data[valid_mask]
+                    min_val = float(np.min(valid_vals))
+                    max_val = float(np.max(valid_vals))
+                    if min_val >= max_val:
+                        max_val = min_val + 1e-5
+
+                    norm = np.zeros_like(channel_data, dtype=np.float64)
+                    norm[valid_mask] = (channel_data[valid_mask] - min_val) / (max_val - min_val)
+                    norm = np.clip(norm, 0.0, 1.0)
+
+                    rgba = cmap(norm)
+                    rgba_u8 = (rgba * 255.0).astype(np.uint8)
+
+                    rgba_u8[~valid_mask, :3] = 0
+                    rgba_u8[~valid_mask, 3] = 0
+                    rgba_u8[valid_mask, 3] = 255
+
+                png_path = out / f"{prefix}_{img_idx}_ch{ch}.png"
+                Image.fromarray(rgba_u8, mode="RGBA").save(png_path)
+
+                if save_colorbar:
+                    fig, ax = plt.subplots(figsize=(1.5, 6))
+                    fig.subplots_adjust(left=0.5)
+
+                    norm_obj = mcolors.Normalize(vmin=min_val, vmax=max_val)
+                    sm = cm.ScalarMappable(norm=norm_obj, cmap=cmap)
+                    sm.set_array([])
+
+                    cbar = fig.colorbar(sm, cax=ax, orientation="vertical")
+
+                    colorbar_path = out / f"{prefix}_{img_idx}_ch{ch}_colorbar.png"
+                    fig.savefig(
+                        colorbar_path,
+                        dpi=200,
+                        bbox_inches="tight",
+                        transparent=False,
+                    )
+                    plt.close(fig)
+
 
 class MOPSStreamline:
     """
