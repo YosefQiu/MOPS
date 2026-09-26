@@ -3,39 +3,97 @@
 #include <cuda_runtime.h>
 
 #include "GPU/CUDA/Kernel/CUDAKernel.h"
+#include "GPU/CUDA/Kernel/VisualizerKernels_Common.cuh"  // Common device functions (Phase 1 refactoring)
+#include "GPU/CUDA/Kernel/CUDAMemoryUtils.cuh"           // Unified CUDA memory utilities
 #include "Common/ImageBuffer.hpp"
 #include "Common/TrajectoryCommon.h"
 #include "Utils/Interpolation.hpp"
 
+// Forward declaration of PathLine kernel (defined in MPASOPathLineKernel.cu)
+namespace MOPS {
+namespace GPU {
+namespace CUDABackend {
+namespace Kernel {
+    __global__ void KernelPathLine(
+        int particle_count,
+        int each_points_size,
+        int n_steps,
+        int simulation_duration,
+        int record_t,
+        int delta_t,
+        bool use_euler,
+        int actual_cell_size,
+        int actual_max_edge_size,
+        int actual_vertex_size,
+        int actual_ztop_layer,
+        int actual_ztop_layer_p1,
+        bool has_double_attributes,
+        int attr_count,
+        const int* default_cell_id,
+        vec3* sample_points,
+        vec3* write_points,
+        vec3* write_vels,
+        vec3* write_attrs,
+        float* particle_depths,
+        const vec3* vertex_coord,
+        const vec3* cell_coord,
+        const size_t* number_vertex_on_cell,
+        const size_t* vertices_on_cell,
+        const size_t* cells_on_cell,
+        const int* max_level_cell,
+        const vec3* cell_vertex_velocity_front,
+        const vec3* cell_vertex_velocity_back,
+        const double* cell_vertex_ztop_front,
+        const double* cell_vertex_ztop_back,
+        const double* cell_vertex_vert_velocity_front,
+        const double* cell_vertex_vert_velocity_back,
+        const double* attr0_front,
+        const double* attr1_front,
+        const double* attr0_back,
+        const double* attr1_back,
+        int* boundary_hit_count,
+        double sigma_h,
+        double sigma_v,
+        double masked_attr_value);
+
+    // Forward declaration of StreamLine kernel (defined in MPASOStreamLineKernel.cu)
+    __global__ void KernelStreamLine(
+        int particle_count,
+        int each_points_size,
+        int times,
+        int record_t,
+        int delta_t,
+        bool use_euler,
+        int actual_cell_size,
+        int actual_max_edge_size,
+        int actual_vertex_size,
+        int actual_ztop_layer,
+        int actual_ztop_layer_p1,
+        const int* default_cell_id,
+        vec3* sample_points,
+        vec3* write_points,
+        vec3* write_vels,
+        float* particle_depths,
+        const vec3* vertex_coord,
+        const vec3* cell_coord,
+        const size_t* number_vertex_on_cell,
+        const size_t* vertices_on_cell,
+        const size_t* cells_on_cell,
+        const vec3* cell_vertex_velocity,
+        const double* cell_vertex_ztop,
+        const double* cell_vertex_vert_velocity);
+}
+}
+}
+}
+
 namespace {
 
-inline void CheckCuda(cudaError_t code, const char* what)
-{
-    if (code != cudaSuccess) {
-        Error("[CUDA]::%s failed: %s", what, cudaGetErrorString(code));
-    }
-}
+// Phase 1 Refactoring: Use common functions from VisualizerKernels_Common.cuh
+using namespace MOPS::GPU::CUDABackend::VisualizerInternal;
 
-template <typename T>
-T* DeviceAllocAndCopy(const std::vector<T>& src, const char* what)
-{
-    if (src.empty()) {
-        return nullptr;
-    }
-
-    T* dst = nullptr;
-    CheckCuda(cudaMalloc(reinterpret_cast<void**>(&dst), src.size() * sizeof(T)), what);
-    CheckCuda(cudaMemcpy(dst, src.data(), src.size() * sizeof(T), cudaMemcpyHostToDevice), what);
-    return dst;
-}
-
-template <typename T>
-void FreeDev(T* dev_ptr, const char* what)
-{
-    if (dev_ptr != nullptr) {
-        CheckCuda(cudaFree(dev_ptr), what);
-    }
-}
+// Use unified CUDA memory utilities
+using namespace MOPS::GPU::CUDABackend::MemoryUtils;
 
 MOPS_HOST_DEVICE inline int ClampInt(int v, int lo, int hi)
 {
@@ -75,8 +133,6 @@ __global__ void KernelVisualizeFixedDepth(
         return;
     }
 
-    constexpr int MAX_VERTEX_NUM = 20;
-    constexpr int MAX_VERTLEVELS = 100;
 
     auto double_nan = nan("");
     vec3 vec3_nan = {double_nan, double_nan, double_nan};
@@ -154,7 +210,7 @@ __global__ void KernelVisualizeFixedDepth(
     }
 
     const int ztop_levels = cell_vertex_ztop_size / actual_vertex_size;
-    if (ztop_levels <= 0 || ztop_levels > MAX_VERTLEVELS) {
+    if (ztop_levels <= 0 || ztop_levels > MAX_VERTICAL_LEVELS) {
         MOPS::SetPixel(img0, width, height, y, x, vec3_nan);
         if (has_attr && img1 != nullptr) {
             MOPS::SetPixel(img1, width, height, y, x, vec3_nan);
@@ -162,7 +218,7 @@ __global__ void KernelVisualizeFixedDepth(
         return;
     }
 
-    double current_point_ztop_vec[MAX_VERTLEVELS];
+    double current_point_ztop_vec[MAX_ZTOP_LAYERS];
     for (int k = 0; k < ztop_levels; ++k) {
         double acc = 0.0;
         for (int v = 0; v < current_cell_vertices_number; ++v) {
@@ -197,22 +253,36 @@ __global__ void KernelVisualizeFixedDepth(
     }
 
     int local_layer = -1;
-    for (int k = 1; k < ztop_levels; ++k) {
-        double top_i = current_point_ztop_vec[k - 1];
-        double bot_i = current_point_ztop_vec[k];
-        if (top_i < bot_i) {
-            double t = top_i;
-            top_i = bot_i;
-            bot_i = t;
-        }
-        if (fixed_depth <= top_i + 1e-8 && fixed_depth >= bot_i - 1e-8) {
-            local_layer = k;
-            break;
-        }
-    }
-    if (fixed_depth <= current_point_ztop_vec[0]) {
+
+    // Check if particle is above surface (shallower than layer 0)
+    // Note: ztop is negative, so "above" means greater value
+    if (fixed_depth >= current_point_ztop_vec[0]) {
         local_layer = 0;
+    } else {
+        // Search for the layer containing fixed_depth
+        for (int k = 1; k < ztop_levels; ++k) {
+            double top_i = current_point_ztop_vec[k - 1];
+            double bot_i = current_point_ztop_vec[k];
+
+            // Check if this layer is masked (zero thickness)
+            double layer_thickness = top_i - bot_i;
+            if (layer_thickness < 1e-6) {
+                // Skip masked layers
+                continue;
+            }
+
+            if (top_i < bot_i) {
+                double t = top_i;
+                top_i = bot_i;
+                bot_i = t;
+            }
+            if (fixed_depth <= top_i + 1e-8 && fixed_depth >= bot_i - 1e-8) {
+                local_layer = k;
+                break;
+            }
+        }
     }
+
     if (local_layer < 0) {
         MOPS::SetPixel(img0, width, height, y, x, vec3_nan);
         if (has_attr && img1 != nullptr) {
@@ -220,6 +290,20 @@ __global__ void KernelVisualizeFixedDepth(
         }
         return;
     }
+
+    // CRITICAL: Check if lower layer is masked (seafloor), move up one layer
+    {
+        double ztop_dn = current_point_ztop_vec[local_layer];
+        double ztop_up = current_point_ztop_vec[local_layer - 1];
+        double layer_thickness = ztop_up - ztop_dn;
+
+        if (fabs(layer_thickness) < 1e-6 && local_layer > 1) {
+            // Lower layer is masked (seafloor) - move particle up one layer
+            local_layer = local_layer - 1;
+        }
+    }
+
+    
 
     double top_i = current_point_ztop_vec[ClampInt(local_layer - 1, 0, ztop_levels - 1)];
     double bot_i = current_point_ztop_vec[ClampInt(local_layer, 0, ztop_levels - 1)];
@@ -332,7 +416,6 @@ __global__ void KernelVisualizeFixedLayer(
         return;
     }
 
-    constexpr int MAX_VERTEX_NUM = 20;
 
     auto double_nan = nan("");
     vec3 vec3_nan = {double_nan, double_nan, double_nan};
@@ -530,12 +613,15 @@ void VisualizeFixedDepth(
     std::vector<int> cell_id_vec(width * height, -1);
     MOPS::CUDAKernel::SearchKDTree(cell_id_vec.data(), mpasoF->mGrid.get(), width, height, min_lat, max_lat, min_lon, max_lon);
 
+    // IMPORTANT: Collect in specific order (temperature, salinity)
     std::vector<const std::vector<double>*> attr_ptrs;
-    for (const auto& kv : mpasoF->mSol_Front->mDoubleAttributes_CtoV) {
-        attr_ptrs.push_back(&kv.second);
-        if (attr_ptrs.size() == 2) {
-            break;
-        }
+    auto temp_it = mpasoF->mSol_Front->mDoubleAttributes_CtoV.find("temperature");
+    auto sal_it = mpasoF->mSol_Front->mDoubleAttributes_CtoV.find("salinity");
+    if (temp_it != mpasoF->mSol_Front->mDoubleAttributes_CtoV.end()) {
+        attr_ptrs.push_back(&temp_it->second);
+    }
+    if (sal_it != mpasoF->mSol_Front->mDoubleAttributes_CtoV.end()) {
+        attr_ptrs.push_back(&sal_it->second);
     }
 
     const bool has_attr = (!attr_ptrs.empty()) && (img_vec.size() > 1);
@@ -670,8 +756,6 @@ void VisualizeFixedLatitude(
         }
     }
 
-    constexpr int MAX_VERTEX_NUM = 20;
-    constexpr int MAX_VERTLEVELS = 100;
     auto double_nan = nan("");
     vec3 vec3_nan = {double_nan, double_nan, double_nan};
 
@@ -683,7 +767,7 @@ void VisualizeFixedLatitude(
     }
 
     int n_vert = ztop_size / actual_vertex_size;
-    if (n_vert <= 0 || n_vert > MAX_VERTLEVELS || (vel_size / actual_vertex_size) < n_vert) {
+    if (n_vert <= 0 || n_vert > MAX_VERTICAL_LEVELS || (vel_size / actual_vertex_size) < n_vert) {
         Error("[CUDABackend::Kernel]::VisualizeFixedLatitude invalid vertical levels");
     }
 
@@ -751,7 +835,7 @@ void VisualizeFixedLatitude(
                 current_cell_vertex_weight,
                 current_cell_vertices_number);
 
-            double current_point_ztop_vec[MAX_VERTLEVELS];
+            double current_point_ztop_vec[MAX_ZTOP_LAYERS];
             for (int k = 0; k < n_vert; ++k) {
                 double current_point_ztop_in_layer = 0.0;
                 for (int v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx) {
@@ -824,11 +908,6 @@ void VisualizeFixedLatitude(
     }
 }
 
-struct StreamlineVelocityState {
-    vec3 h_vel;
-    double v_vel;
-    bool ok;
-};
 
 MOPS_DEVICE inline vec3 AdvectOnSphereCUDA(const vec3& pos, const vec3& vel, double dt_local)
 {
@@ -843,469 +922,7 @@ MOPS_DEVICE inline vec3 AdvectOnSphereCUDA(const vec3& pos, const vec3& vel, dou
     return MOPS::CUDAKernel::CalcPositionAfterRotation(pos, axis, theta);
 }
 
-MOPS_DEVICE inline StreamlineVelocityState CalcVelocityAtCUDA(
-    const vec3& pos,
-    int cell_id,
-    double current_depth,
-    int actual_max_edge_size,
-    int actual_vertex_size,
-    int actual_ztop_layer,
-    int actual_ztop_layer_p1,
-    const size_t* number_vertex_on_cell,
-    const size_t* vertices_on_cell,
-    const vec3* vertex_coord,
-    const vec3* cell_vertex_velocity,
-    const double* cell_vertex_ztop,
-    const double* cell_vertex_vert_velocity)
-{
-    constexpr int MAX_VERTEX_NUM = 20;
-    constexpr int MAX_VERTICAL_LEVEL_NUM = 100;
 
-    if (cell_id < 0) {
-        return {vec3{0.0, 0.0, 0.0}, 0.0, false};
-    }
-    if (actual_ztop_layer <= 1 || actual_ztop_layer > MAX_VERTICAL_LEVEL_NUM) {
-        return {vec3{0.0, 0.0, 0.0}, 0.0, false};
-    }
-
-    vec3 current_position = pos;
-    const int current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
-    if (current_cell_vertices_number <= 0 || current_cell_vertices_number > MAX_VERTEX_NUM) {
-        return {vec3{0.0, 0.0, 0.0}, 0.0, false};
-    }
-
-    bool is_in_mesh = MOPS::CUDAKernel::IsInMesh(
-        cell_id,
-        actual_max_edge_size,
-        current_position,
-        number_vertex_on_cell,
-        vertices_on_cell,
-        vertex_coord);
-    if (!is_in_mesh) {
-        return {vec3{0.0, 0.0, 0.0}, 0.0, false};
-    }
-
-    size_t current_cell_vertices_idx[MAX_VERTEX_NUM];
-    MOPS::CUDAKernel::GetCellVerticesIdx(
-        cell_id,
-        current_cell_vertices_number,
-        current_cell_vertices_idx,
-        MAX_VERTEX_NUM,
-        actual_max_edge_size,
-        vertices_on_cell);
-
-    vec3 current_cell_vertex_pos[MAX_VERTEX_NUM];
-    if (!MOPS::CUDAKernel::GetCellVertexPos(
-            current_cell_vertex_pos,
-            current_cell_vertices_idx,
-            MAX_VERTEX_NUM,
-            current_cell_vertices_number,
-            vertex_coord)) {
-        return {vec3{0.0, 0.0, 0.0}, 0.0, false};
-    }
-
-    double current_cell_vertex_weight[MAX_VERTEX_NUM];
-    for (int i = 0; i < MAX_VERTEX_NUM; ++i) {
-        current_cell_vertex_weight[i] = 0.0;
-    }
-    Interpolator::CalcPolygonWachspress(
-        current_position,
-        current_cell_vertex_pos,
-        current_cell_vertex_weight,
-        current_cell_vertices_number);
-
-    double current_point_ztop_vec[MAX_VERTICAL_LEVEL_NUM];
-    for (int k = 0; k < actual_ztop_layer; ++k) {
-        double current_point_ztop_in_layer = 0.0;
-        for (int v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx) {
-            int vid = static_cast<int>(current_cell_vertices_idx[v_idx]);
-            if (vid < 0 || vid >= actual_vertex_size) {
-                return {vec3{0.0, 0.0, 0.0}, 0.0, false};
-            }
-            double ztop = cell_vertex_ztop[vid * actual_ztop_layer + k];
-            current_point_ztop_in_layer += current_cell_vertex_weight[v_idx] * ztop;
-        }
-        current_point_ztop_vec[k] = current_point_ztop_in_layer;
-    }
-
-    for (int k = 1; k < actual_ztop_layer; ++k) {
-        if (current_point_ztop_vec[k] > current_point_ztop_vec[k - 1]) {
-            current_point_ztop_vec[k] = current_point_ztop_vec[k - 1] - 1e-9;
-        }
-    }
-
-    const double eps = 1e-8;
-    int local_layer = -1;
-    if (current_depth > current_point_ztop_vec[0] + eps) {
-        local_layer = 1;
-    } else if (current_depth < current_point_ztop_vec[actual_ztop_layer - 1] - eps) {
-        local_layer = actual_ztop_layer - 1;
-    } else {
-        int lo = 1;
-        int hi = actual_ztop_layer - 1;
-        int ans = 1;
-        while (lo <= hi) {
-            int mid = (lo + hi) >> 1;
-            double top_i = current_point_ztop_vec[mid - 1];
-            double bot_i = current_point_ztop_vec[mid];
-
-            if (current_depth <= top_i + eps && current_depth >= bot_i - eps) {
-                ans = mid;
-                break;
-            }
-
-            if (current_depth > top_i + eps) {
-                hi = mid - 1;
-            } else {
-                lo = mid + 1;
-            }
-        }
-        if (ans < 1) {
-            ans = 1;
-        }
-        if (ans > actual_ztop_layer - 1) {
-            ans = actual_ztop_layer - 1;
-        }
-        local_layer = ans;
-    }
-
-    if (local_layer < 0) {
-        return {vec3{0.0, 0.0, 0.0}, 0.0, false};
-    }
-
-    const double ztop_dn = current_point_ztop_vec[local_layer];
-    const double ztop_up = current_point_ztop_vec[local_layer - 1];
-
-    double x = current_depth;
-    x = fmax(ztop_dn, fmin(x, ztop_up));
-    const double denom = ztop_up - ztop_dn;
-    if (fabs(denom) < 1e-12) {
-        return {vec3{0.0, 0.0, 0.0}, 0.0, false};
-    }
-    const double t = (x - ztop_dn) / denom;
-
-    vec3 current_point_vel_dn = MOPS::CUDAKernel::CalcVelocity(
-        current_cell_vertices_idx,
-        current_cell_vertex_weight,
-        MAX_VERTEX_NUM,
-        current_cell_vertices_number,
-        actual_ztop_layer,
-        local_layer,
-        cell_vertex_velocity);
-
-    vec3 current_point_vel_up = MOPS::CUDAKernel::CalcVelocity(
-        current_cell_vertices_idx,
-        current_cell_vertex_weight,
-        MAX_VERTEX_NUM,
-        current_cell_vertices_number,
-        actual_ztop_layer,
-        local_layer - 1,
-        cell_vertex_velocity);
-
-    const double vel_dn_mag = MOPS_LENGTH(current_point_vel_dn);
-    const double vel_up_mag = MOPS_LENGTH(current_point_vel_up);
-    if (vel_dn_mag < 1e-12 || vel_up_mag < 1e-12) {
-        return {vec3{0.0, 0.0, 0.0}, 0.0, false};
-    }
-
-    vec3 final_vel;
-    final_vel.x() = t * current_point_vel_up.x() + (1.0 - t) * current_point_vel_dn.x();
-    final_vel.y() = t * current_point_vel_up.y() + (1.0 - t) * current_point_vel_dn.y();
-    final_vel.z() = t * current_point_vel_up.z() + (1.0 - t) * current_point_vel_dn.z();
-
-    const double vel_mag = MOPS_LENGTH(final_vel);
-    if (vel_mag < 1e-12) {
-        return {vec3{0.0, 0.0, 0.0}, 0.0, false};
-    }
-
-    int dn_if = local_layer;
-    int up_if = (local_layer > 0) ? (local_layer - 1) : 0;
-    if (dn_if >= actual_ztop_layer_p1) {
-        dn_if = actual_ztop_layer_p1 - 1;
-    }
-    if (up_if >= actual_ztop_layer_p1) {
-        up_if = actual_ztop_layer_p1 - 1;
-    }
-
-    double w_dn = MOPS::CUDAKernel::CalcAttribute(
-        current_cell_vertices_idx,
-        current_cell_vertex_weight,
-        MAX_VERTEX_NUM,
-        current_cell_vertices_number,
-        actual_ztop_layer_p1,
-        dn_if,
-        cell_vertex_vert_velocity);
-
-    double w_up = MOPS::CUDAKernel::CalcAttribute(
-        current_cell_vertices_idx,
-        current_cell_vertex_weight,
-        MAX_VERTEX_NUM,
-        current_cell_vertices_number,
-        actual_ztop_layer_p1,
-        up_if,
-        cell_vertex_vert_velocity);
-
-    double current_vertical_velocity = t * w_up + (1.0 - t) * w_dn;
-    return {final_vel, current_vertical_velocity, true};
-}
-
-__global__ void KernelStreamLine(
-    int particle_count,
-    int each_points_size,
-    int times,
-    int record_t,
-    int delta_t,
-    bool use_euler,
-    int actual_cell_size,
-    int actual_max_edge_size,
-    int actual_vertex_size,
-    int actual_ztop_layer,
-    int actual_ztop_layer_p1,
-    const int* default_cell_id,
-    vec3* sample_points,
-    vec3* write_points,
-    vec3* write_vels,
-    float* particle_depths,
-    const vec3* vertex_coord,
-    const vec3* cell_coord,
-    const size_t* number_vertex_on_cell,
-    const size_t* vertices_on_cell,
-    const size_t* cells_on_cell,
-    const vec3* cell_vertex_velocity,
-    const double* cell_vertex_ztop,
-    const double* cell_vertex_vert_velocity)
-{
-    const int global_id = static_cast<int>(blockIdx.x) * blockDim.x + threadIdx.x;
-    if (global_id >= particle_count || each_points_size <= 0 || times <= 0) {
-        return;
-    }
-
-    constexpr int MAX_CELL_NEIGHBOR_NUM = 21;
-
-    int run_time = 0;
-    bool first_loop = true;
-    bool first_vel = true;
-
-    const int base_idx = global_id * each_points_size;
-    int update_points_idx = 0;
-
-    vec3 sample_point_position;
-    vec3 new_position;
-    int cell_id = -1;
-    int current_cell_vertices_number = 0;  // Declare here to be accessible throughout the loop
-    int cell_neig_vec[MAX_CELL_NEIGHBOR_NUM];
-
-    for (int i = 0; i < MAX_CELL_NEIGHBOR_NUM; ++i) {
-        cell_neig_vec[i] = -1;
-    }
-
-    for (int times_i = 0; times_i < times; ++times_i) {
-        run_time += abs(delta_t);
-        sample_point_position = sample_points[global_id];
-        double current_depth = -1.0 * static_cast<double>(particle_depths[global_id]);
-
-        int first_cell_id = default_cell_id[global_id];
-        if (first_loop) {
-            first_loop = false;
-            cell_id = first_cell_id;
-            if (cell_id < 0 || cell_id >= actual_cell_size) {
-                return;
-            }
-
-            int current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
-            MOPS::CUDAKernel::GetCellNeighborsIdx(
-                cell_id,
-                current_cell_vertices_number,
-                cell_neig_vec,
-                MAX_CELL_NEIGHBOR_NUM,
-                actual_max_edge_size,
-                cells_on_cell);
-            write_points[base_idx] = sample_point_position;
-        } else {
-            if (cell_id < 0 || cell_id >= actual_cell_size) {
-                return;
-            }
-
-            current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
-            double max_len = 1e300;
-            for (int idx = 0; idx < current_cell_vertices_number + 1; ++idx) {
-                int cid = cell_neig_vec[idx];
-                if (cid < 0 || cid >= actual_cell_size) {
-                    continue;
-                }
-
-                vec3 cell_center_position = cell_coord[cid];
-                double len = MOPS_LENGTH(cell_center_position - sample_point_position);
-                if (len < max_len) {
-                    max_len = len;
-                    cell_id = cid;
-                }
-            }
-
-            current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
-            MOPS::CUDAKernel::GetCellNeighborsIdx(
-                cell_id,
-                current_cell_vertices_number,
-                cell_neig_vec,
-                MAX_CELL_NEIGHBOR_NUM,
-                actual_max_edge_size,
-                cells_on_cell);
-        }
-
-        vec3 current_position = sample_point_position;
-        vec3 current_horizontal_velocity = {0.0, 0.0, 0.0};
-        double current_vertical_velocity = 0.0;
-        double r = MOPS_LENGTH(current_position);
-        vec3 rk4_next_position = current_position;
-
-        if (use_euler) {
-            StreamlineVelocityState state = CalcVelocityAtCUDA(
-                current_position,
-                cell_id,
-                current_depth,
-                actual_max_edge_size,
-                actual_vertex_size,
-                actual_ztop_layer,
-                actual_ztop_layer_p1,
-                number_vertex_on_cell,
-                vertices_on_cell,
-                vertex_coord,
-                cell_vertex_velocity,
-                cell_vertex_ztop,
-                cell_vertex_vert_velocity);
-            if (!state.ok) {
-                return;
-            }
-
-            current_horizontal_velocity = state.h_vel;
-            current_vertical_velocity = state.v_vel;
-        } else {
-            double dt = static_cast<double>(delta_t);
-
-            StreamlineVelocityState s1 = CalcVelocityAtCUDA(
-                current_position,
-                cell_id,
-                current_depth,
-                actual_max_edge_size,
-                actual_vertex_size,
-                actual_ztop_layer,
-                actual_ztop_layer_p1,
-                number_vertex_on_cell,
-                vertices_on_cell,
-                vertex_coord,
-                cell_vertex_velocity,
-                cell_vertex_ztop,
-                cell_vertex_vert_velocity);
-            if (!s1.ok) {
-                return;
-            }
-
-            vec3 p2 = AdvectOnSphereCUDA(current_position, s1.h_vel, dt * 0.5);
-            StreamlineVelocityState s2 = CalcVelocityAtCUDA(
-                p2,
-                cell_id,
-                current_depth,
-                actual_max_edge_size,
-                actual_vertex_size,
-                actual_ztop_layer,
-                actual_ztop_layer_p1,
-                number_vertex_on_cell,
-                vertices_on_cell,
-                vertex_coord,
-                cell_vertex_velocity,
-                cell_vertex_ztop,
-                cell_vertex_vert_velocity);
-            if (!s2.ok) {
-                return;
-            }
-
-            vec3 p3 = AdvectOnSphereCUDA(current_position, s2.h_vel, dt * 0.5);
-            StreamlineVelocityState s3 = CalcVelocityAtCUDA(
-                p3,
-                cell_id,
-                current_depth,
-                actual_max_edge_size,
-                actual_vertex_size,
-                actual_ztop_layer,
-                actual_ztop_layer_p1,
-                number_vertex_on_cell,
-                vertices_on_cell,
-                vertex_coord,
-                cell_vertex_velocity,
-                cell_vertex_ztop,
-                cell_vertex_vert_velocity);
-            if (!s3.ok) {
-                return;
-            }
-
-            vec3 p4 = AdvectOnSphereCUDA(current_position, s3.h_vel, dt);
-            StreamlineVelocityState s4 = CalcVelocityAtCUDA(
-                p4,
-                cell_id,
-                current_depth,
-                actual_max_edge_size,
-                actual_vertex_size,
-                actual_ztop_layer,
-                actual_ztop_layer_p1,
-                number_vertex_on_cell,
-                vertices_on_cell,
-                vertex_coord,
-                cell_vertex_velocity,
-                cell_vertex_ztop,
-                cell_vertex_vert_velocity);
-            if (!s4.ok) {
-                return;
-            }
-
-            current_horizontal_velocity = (s1.h_vel + 2.0 * s2.h_vel + 2.0 * s3.h_vel + s4.h_vel) / 6.0;
-            current_vertical_velocity = (s1.v_vel + 2.0 * s2.v_vel + 2.0 * s3.v_vel + s4.v_vel) / 6.0;
-
-            vec3 x_trial = current_position + current_horizontal_velocity * dt;
-            double x_trial_len = MOPS_LENGTH(x_trial);
-            if (x_trial_len > 1e-12) {
-                rk4_next_position = (x_trial / x_trial_len) * r;
-            } else {
-                rk4_next_position = current_position;
-            }
-        }
-
-        if (use_euler) {
-            vec3 rotation_axis = MOPS::CUDAKernel::CalcRotationAxis(current_position, current_horizontal_velocity);
-            double speed = MOPS_LENGTH(current_horizontal_velocity);
-            double theta_rad = (speed * delta_t) / r;
-            new_position = MOPS::CUDAKernel::CalcPositionAfterRotation(current_position, rotation_axis, theta_rad);
-        } else {
-            new_position = rk4_next_position;
-        }
-
-        double old_depth = static_cast<double>(particle_depths[global_id]);
-        double new_depth = old_depth - current_vertical_velocity * static_cast<double>(delta_t);
-        new_depth = fmax(0.0, new_depth);
-        double r_new = fmax(1.0, r + current_vertical_velocity * static_cast<double>(delta_t));
-        particle_depths[global_id] = static_cast<float>(new_depth);
-
-        double new_len = MOPS_LENGTH(new_position);
-        if (new_len > 1e-12) {
-            new_position = (new_position / new_len) * r_new;
-        }
-
-        if (first_vel) {
-            first_vel = false;
-            write_vels[base_idx] = current_horizontal_velocity;
-        }
-
-        sample_points[global_id] = new_position;
-
-        if (record_t > 0 && (run_time % record_t) == 0) {
-            int write_idx = base_idx + update_points_idx;
-            if (write_idx >= 0 && write_idx < ((global_id + 1) * each_points_size)) {
-                write_points[write_idx] = new_position;
-                write_vels[write_idx] = current_horizontal_velocity;
-            }
-            update_points_idx += 1;
-        }
-    }
-}
 
 std::vector<TrajectoryLine> StreamLine(
     MPASOField* mpasoF,
@@ -1457,12 +1074,6 @@ std::vector<TrajectoryLine> StreamLine(
     return clean_traj;
 }
 
-struct PathlineVelocityState {
-    vec3 h_vel;
-    double v_vel;
-    vec3 attr;
-    bool ok;
-};
 
 // Helper function: Calculate zTop at surface level (level 0) at given position
 MOPS_DEVICE inline double CalcZTopAtLevel0CUDA(
@@ -1476,7 +1087,6 @@ MOPS_DEVICE inline double CalcZTopAtLevel0CUDA(
     const vec3* vertex_coord,
     const double* cell_vertex_ztop)
 {
-    constexpr int MAX_VERTEX_NUM = 10;
 
     if (cell_id < 0) {
         return 0.0;
@@ -1534,6 +1144,75 @@ MOPS_DEVICE inline double CalcZTopAtLevel0CUDA(
 }
 
 // Helper function: Calculate zTop at bottom level (seafloor) at given position
+// Helper function to interpolate zTop at a specific layer
+MOPS_DEVICE inline double CalcZTopAtLayerCUDA(
+    const vec3& pos,
+    int cell_id,
+    int layer_idx,  // 0-based layer index
+    int actual_max_edge_size,
+    int actual_vertex_size,
+    int actual_ztop_layer,
+    const size_t* number_vertex_on_cell,
+    const size_t* vertices_on_cell,
+    const vec3* vertex_coord,
+    const double* cell_vertex_ztop)
+{
+
+    if (cell_id < 0 || layer_idx < 0 || layer_idx >= actual_ztop_layer) {
+        return -1e10;
+    }
+
+    int current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
+    if (current_cell_vertices_number <= 0 || current_cell_vertices_number > MAX_VERTEX_NUM) {
+        return -1e10;
+    }
+
+    // Get cell vertex indices
+    size_t current_cell_vertices_idx[MAX_VERTEX_NUM];
+    MOPS::CUDAKernel::GetCellVerticesIdx(
+        cell_id,
+        current_cell_vertices_number,
+        current_cell_vertices_idx,
+        MAX_VERTEX_NUM,
+        actual_max_edge_size,
+        vertices_on_cell);
+
+    // Get cell vertex positions
+    vec3 current_cell_vertex_pos[MAX_VERTEX_NUM];
+    if (!MOPS::CUDAKernel::GetCellVertexPos(
+            current_cell_vertex_pos,
+            current_cell_vertices_idx,
+            MAX_VERTEX_NUM,
+            current_cell_vertices_number,
+            vertex_coord)) {
+        return -1e10;
+    }
+
+    // Calculate Wachspress weights
+    double current_cell_vertex_weight[MAX_VERTEX_NUM];
+    for (int i = 0; i < MAX_VERTEX_NUM; ++i) {
+        current_cell_vertex_weight[i] = 0.0;
+    }
+    Interpolator::CalcPolygonWachspress(
+        pos,
+        current_cell_vertex_pos,
+        current_cell_vertex_weight,
+        current_cell_vertices_number);
+
+    // Interpolate zTop at specified layer
+    double ztop = 0.0;
+    for (int v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx) {
+        int vid = static_cast<int>(current_cell_vertices_idx[v_idx]);
+        if (vid < 0 || vid >= actual_vertex_size) {
+            continue;
+        }
+        double ztop_at_vertex = cell_vertex_ztop[vid * actual_ztop_layer + layer_idx];
+        ztop += current_cell_vertex_weight[v_idx] * ztop_at_vertex;
+    }
+
+    return ztop;
+}
+
 MOPS_DEVICE inline double CalcZTopAtBottomCUDA(
     const vec3& pos,
     int cell_id,
@@ -1543,9 +1222,9 @@ MOPS_DEVICE inline double CalcZTopAtBottomCUDA(
     const size_t* number_vertex_on_cell,
     const size_t* vertices_on_cell,
     const vec3* vertex_coord,
-    const double* cell_vertex_ztop)
+    const double* cell_vertex_ztop,
+    const int* max_level_cell = nullptr)
 {
-    constexpr int MAX_VERTEX_NUM = 10;
 
     if (cell_id < 0) {
         return -1e10;  // Very deep default for invalid cell
@@ -1592,8 +1271,19 @@ MOPS_DEVICE inline double CalcZTopAtBottomCUDA(
         current_cell_vertex_weight,
         current_cell_vertices_number);
 
-    // Interpolate zTop at bottom layer (last layer)
+    // Determine bottom layer index
+    // If maxLevelCell is available, use it to get the last VALID ocean layer
+    // Otherwise fall back to the last layer in the array
     int bottom_layer = actual_ztop_layer - 1;
+    if (max_level_cell != nullptr) {
+        int cell_max_level = max_level_cell[cell_id];
+        // maxLevelCell is 1-based: [1, nVertLevels]
+        if (cell_max_level >= 1 && cell_max_level <= actual_ztop_layer) {
+            bottom_layer = cell_max_level - 1;  // Convert to 0-based index
+        }
+    }
+
+    // Interpolate zTop at bottom layer
     double ztop_bottom = 0.0;
     for (int v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx) {
         int vid = static_cast<int>(current_cell_vertices_idx[v_idx]);
@@ -1605,75 +1295,6 @@ MOPS_DEVICE inline double CalcZTopAtBottomCUDA(
     }
 
     return ztop_bottom;
-}
-
-// Helper function: Find nearest edge of a cell to given position
-MOPS_DEVICE inline void FindNearestCellEdgeCUDA(
-    const vec3& pos,
-    int cell_id,
-    int actual_max_edge_size,
-    const size_t* number_vertex_on_cell,
-    const size_t* vertices_on_cell,
-    const vec3* vertex_coord,
-    int& edge_vertex_a_idx,
-    int& edge_vertex_b_idx)
-{
-    constexpr int MAX_VERTEX_NUM = 10;
-
-    edge_vertex_a_idx = -1;
-    edge_vertex_b_idx = -1;
-
-    if (cell_id < 0) {
-        return;
-    }
-
-    int current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
-    if (current_cell_vertices_number <= 0 || current_cell_vertices_number > MAX_VERTEX_NUM) {
-        return;
-    }
-
-    // Get cell vertex indices
-    size_t current_cell_vertices_idx[MAX_VERTEX_NUM];
-    MOPS::CUDAKernel::GetCellVerticesIdx(
-        cell_id,
-        current_cell_vertices_number,
-        current_cell_vertices_idx,
-        MAX_VERTEX_NUM,
-        actual_max_edge_size,
-        vertices_on_cell);
-
-    // Find nearest edge by finding minimum distance from point to edge
-    double min_dist = 1e300;
-    for (int i = 0; i < current_cell_vertices_number; ++i) {
-        int next_i = (i + 1) % current_cell_vertices_number;
-        int va_idx = static_cast<int>(current_cell_vertices_idx[i]);
-        int vb_idx = static_cast<int>(current_cell_vertices_idx[next_i]);
-
-        vec3 va = vertex_coord[va_idx];
-        vec3 vb = vertex_coord[vb_idx];
-
-        // Calculate distance from pos to edge (va, vb)
-        // Using point-to-line-segment distance on the sphere
-        vec3 edge_vec = vb - va;
-        vec3 pos_vec = pos - va;
-
-        double edge_len_sq = MOPS_DOT(edge_vec, edge_vec);
-        if (edge_len_sq < 1e-12) {
-            continue;
-        }
-
-        double t = MOPS_DOT(pos_vec, edge_vec) / edge_len_sq;
-        t = fmax(0.0, fmin(1.0, t));  // clamp to [0, 1]
-
-        vec3 closest_point = va + edge_vec * t;
-        double dist = MOPS_LENGTH(pos - closest_point);
-
-        if (dist < min_dist) {
-            min_dist = dist;
-            edge_vertex_a_idx = va_idx;
-            edge_vertex_b_idx = vb_idx;
-        }
-    }
 }
 
 // Helper function: Project velocity onto edge tangent direction
@@ -1754,7 +1375,6 @@ MOPS_DEVICE inline int FindContainingCellInCurrentOrNeighborsCUDA(
     const size_t* vertices_on_cell,
     const vec3* vertex_coord)
 {
-    constexpr int MAX_VERTEX_NUM = 10;
 
     // First check current cell (fast path)
     bool in_current = MOPS::CUDAKernel::IsInMesh(
@@ -1880,1220 +1500,10 @@ MOPS_DEVICE inline vec3 GenerateRandomTangentVelocityCUDA(
 
 // Helper function: Try multiple random directions to find valid escape
 // Returns true if valid position found, false if all attempts failed
-MOPS_DEVICE inline bool TryMultipleRandomDirectionsCUDA(
-    const vec3& current_position,
-    int cell_id,
-    int global_id,
-    int i_step,
-    double r,
-    double r_new,
-    double delta_t,
-    int actual_max_edge_size,
-    const size_t* number_vertex_on_cell,
-    const size_t* vertices_on_cell,
-    const vec3* vertex_coord,
-    vec3& out_position,
-    double& out_kick_speed)
-{
-    // Progressive kick speeds: start small, increase if needed
-    constexpr int MAX_ATTEMPTS = 20;
-    constexpr double BASE_KICK_SPEED = 0.01;  // 1 cm/s
 
-    for (int attempt = 0; attempt < MAX_ATTEMPTS; ++attempt) {
-        // Increase kick speed every 5 attempts
-        double kick_speed = BASE_KICK_SPEED * (1.0 + (attempt / 5) * 2.0);
-
-        // Generate random velocity with different seed for each attempt
-        vec3 random_vel = GenerateRandomTangentVelocityCUDA(
-            current_position,
-            global_id,
-            i_step,
-            kick_speed,
-            attempt);  // Different attempt number = different random direction
-
-        // Calculate new position with random velocity
-        vec3 random_rotation_axis = MOPS::CUDAKernel::CalcRotationAxis(
-            current_position,
-            random_vel);
-        double random_theta_rad = (kick_speed * delta_t) / r;
-
-        vec3 random_candidate = MOPS::CUDAKernel::CalcPositionAfterRotation(
-            current_position,
-            random_rotation_axis,
-            random_theta_rad);
-
-        // Rescale to correct radius
-        double random_len = MOPS_LENGTH(random_candidate);
-        if (random_len > 1e-12) {
-            random_candidate = (random_candidate / random_len) * r_new;
-        }
-
-        // Validate random direction - check if it's in the SAME cell first (fast)
-        bool random_is_valid = MOPS::CUDAKernel::IsInMesh(
-            cell_id,
-            actual_max_edge_size,
-            random_candidate,
-            number_vertex_on_cell,
-            vertices_on_cell,
-            vertex_coord);
-
-        if (random_is_valid) {
-            out_position = random_candidate;
-            out_kick_speed = kick_speed;
-            return true;
-        }
-
-        // If not in same cell, try a few more attempts before giving up
-        // This allows particles to potentially move to neighboring cells
-    }
-
-    // All attempts failed
-    return false;
-}
-
-MOPS_DEVICE inline PathlineVelocityState CalcVelocityAtPathlineCUDA(
-    const vec3& pos,
-    int cell_id,
-    double current_depth,
-    double alpha,
-    int actual_max_edge_size,
-    int actual_vertex_size,
-    int actual_ztop_layer,
-    int actual_ztop_layer_p1,
-    bool has_double_attributes,
-    int attr_count,
-    const size_t* number_vertex_on_cell,
-    const size_t* vertices_on_cell,
-    const vec3* vertex_coord,
-    const vec3* cell_vertex_velocity_front,
-    const vec3* cell_vertex_velocity_back,
-    const double* cell_vertex_ztop_front,
-    const double* cell_vertex_ztop_back,
-    const double* cell_vertex_vert_velocity_front,
-    const double* cell_vertex_vert_velocity_back,
-    const double* attr0_front,
-    const double* attr1_front,
-    const double* attr0_back,
-    const double* attr1_back)
-{
-    constexpr int MAX_VERTEX_NUM = 10;
-    constexpr int MAX_VERTICAL_LEVEL_NUM = 100;
-
-    auto ret0 = []() -> PathlineVelocityState {
-        return {vec3{0.0, 0.0, 0.0}, 0.0, vec3{0.0, 0.0, 0.0}, false};
-    };
-
-    if (cell_id < 0) {
-        return ret0();
-    }
-    if (actual_ztop_layer <= 1 || actual_ztop_layer > MAX_VERTICAL_LEVEL_NUM) {
-        return ret0();
-    }
-
-    vec3 current_position = pos;
-    int current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
-    if (current_cell_vertices_number <= 0 || current_cell_vertices_number > MAX_VERTEX_NUM) {
-        return ret0();
-    }
-
-    bool is_in_mesh = MOPS::CUDAKernel::IsInMesh(
-        cell_id,
-        actual_max_edge_size,
-        current_position,
-        number_vertex_on_cell,
-        vertices_on_cell,
-        vertex_coord);
-    if (!is_in_mesh) {
-        return ret0();
-    }
-
-    size_t current_cell_vertices_idx[MAX_VERTEX_NUM];
-    MOPS::CUDAKernel::GetCellVerticesIdx(
-        cell_id,
-        current_cell_vertices_number,
-        current_cell_vertices_idx,
-        MAX_VERTEX_NUM,
-        actual_max_edge_size,
-        vertices_on_cell);
-
-    vec3 current_cell_vertex_pos[MAX_VERTEX_NUM];
-    if (!MOPS::CUDAKernel::GetCellVertexPos(
-            current_cell_vertex_pos,
-            current_cell_vertices_idx,
-            MAX_VERTEX_NUM,
-            current_cell_vertices_number,
-            vertex_coord)) {
-        return ret0();
-    }
-
-    double current_cell_vertex_weight[MAX_VERTEX_NUM];
-    for (int i = 0; i < MAX_VERTEX_NUM; ++i) {
-        current_cell_vertex_weight[i] = 0.0;
-    }
-    Interpolator::CalcPolygonWachspress(
-        current_position,
-        current_cell_vertex_pos,
-        current_cell_vertex_weight,
-        current_cell_vertices_number);
-
-    double current_point_ztop_front_vec[MAX_VERTICAL_LEVEL_NUM];
-    double current_point_ztop_back_vec[MAX_VERTICAL_LEVEL_NUM];
-    for (int k = 0; k < actual_ztop_layer; ++k) {
-        double current_point_ztop_in_layer_front = 0.0;
-        double current_point_ztop_in_layer_back = 0.0;
-        for (int v_idx = 0; v_idx < current_cell_vertices_number; ++v_idx) {
-            int vid = static_cast<int>(current_cell_vertices_idx[v_idx]);
-            if (vid < 0 || vid >= actual_vertex_size) {
-                return ret0();
-            }
-
-            double ztop_front = cell_vertex_ztop_front[vid * actual_ztop_layer + k];
-            double ztop_back = cell_vertex_ztop_back[vid * actual_ztop_layer + k];
-            current_point_ztop_in_layer_front += current_cell_vertex_weight[v_idx] * ztop_front;
-            current_point_ztop_in_layer_back += current_cell_vertex_weight[v_idx] * ztop_back;
-        }
-        current_point_ztop_front_vec[k] = current_point_ztop_in_layer_front;
-        current_point_ztop_back_vec[k] = current_point_ztop_in_layer_back;
-    }
-
-    for (int k = 1; k < actual_ztop_layer; ++k) {
-        if (current_point_ztop_front_vec[k] > current_point_ztop_front_vec[k - 1]) {
-            current_point_ztop_front_vec[k] = current_point_ztop_front_vec[k - 1] - 1e-9;
-        }
-        if (current_point_ztop_back_vec[k] > current_point_ztop_back_vec[k - 1]) {
-            current_point_ztop_back_vec[k] = current_point_ztop_back_vec[k - 1] - 1e-9;
-        }
-    }
-
-    const double eps = 1e-8;
-    int local_layer_front = -1;
-    int local_layer_back = -1;
-    bool skip_loop_front = false;
-    bool skip_loop_back = false;
-
-    if (current_depth > current_point_ztop_front_vec[0] + eps) {
-        local_layer_front = 0;
-        skip_loop_front = true;
-    } else if (current_depth < current_point_ztop_front_vec[actual_ztop_layer - 1] - eps) {
-        local_layer_front = actual_ztop_layer - 1;
-        skip_loop_front = true;
-    }
-
-    if (current_depth > current_point_ztop_back_vec[0] + eps) {
-        local_layer_back = 0;
-        skip_loop_back = true;
-    } else if (current_depth < current_point_ztop_back_vec[actual_ztop_layer - 1] - eps) {
-        local_layer_back = actual_ztop_layer - 1;
-        skip_loop_back = true;
-    }
-
-    if (!skip_loop_front) {
-        for (int k = 1; k < actual_ztop_layer; ++k) {
-            double top_i = current_point_ztop_front_vec[k - 1];
-            double bot_i = current_point_ztop_front_vec[k];
-            if (current_depth <= top_i + eps && current_depth >= bot_i - eps) {
-                local_layer_front = k;
-                break;
-            }
-        }
-    }
-
-    if (!skip_loop_back) {
-        for (int k = 1; k < actual_ztop_layer; ++k) {
-            double top_i = current_point_ztop_back_vec[k - 1];
-            double bot_i = current_point_ztop_back_vec[k];
-            if (current_depth <= top_i + eps && current_depth >= bot_i - eps) {
-                local_layer_back = k;
-                break;
-            }
-        }
-    }
-
-    if (local_layer_front < 0 || local_layer_back < 0) {
-        return ret0();
-    }
-
-    double ztop_layer_front_dn = current_point_ztop_front_vec[local_layer_front];
-    double ztop_layer_front_up = current_point_ztop_front_vec[local_layer_front - 1];
-    double ztop_layer_back_dn = current_point_ztop_back_vec[local_layer_back];
-    double ztop_layer_back_up = current_point_ztop_back_vec[local_layer_back - 1];
-
-    double x_front = current_depth;
-    double x_back = current_depth;
-
-    x_front = fmax(ztop_layer_front_dn, fmin(x_front, ztop_layer_front_up));
-    double denom = ztop_layer_front_up - ztop_layer_front_dn;
-    if (fabs(denom) < 1e-12) {
-        return ret0();
-    }
-    double t_front = (x_front - ztop_layer_front_dn) / denom;
-
-    x_back = fmax(ztop_layer_back_dn, fmin(x_back, ztop_layer_back_up));
-    denom = ztop_layer_back_up - ztop_layer_back_dn;
-    if (fabs(denom) < 1e-12) {
-        return ret0();
-    }
-    double t_back = (x_back - ztop_layer_back_dn) / denom;
-
-    vec3 current_point_vel_dn_front = MOPS::CUDAKernel::CalcVelocity(
-        current_cell_vertices_idx,
-        current_cell_vertex_weight,
-        MAX_VERTEX_NUM,
-        current_cell_vertices_number,
-        actual_ztop_layer,
-        local_layer_front,
-        cell_vertex_velocity_front);
-
-    vec3 current_point_vel_up_front = MOPS::CUDAKernel::CalcVelocity(
-        current_cell_vertices_idx,
-        current_cell_vertex_weight,
-        MAX_VERTEX_NUM,
-        current_cell_vertices_number,
-        actual_ztop_layer,
-        local_layer_front - 1,
-        cell_vertex_velocity_front);
-
-    vec3 final_vel_front;
-    final_vel_front.x() = t_front * current_point_vel_up_front.x() + (1.0 - t_front) * current_point_vel_dn_front.x();
-    final_vel_front.y() = t_front * current_point_vel_up_front.y() + (1.0 - t_front) * current_point_vel_dn_front.y();
-    final_vel_front.z() = t_front * current_point_vel_up_front.z() + (1.0 - t_front) * current_point_vel_dn_front.z();
-
-    vec3 current_point_vel_dn_back = MOPS::CUDAKernel::CalcVelocity(
-        current_cell_vertices_idx,
-        current_cell_vertex_weight,
-        MAX_VERTEX_NUM,
-        current_cell_vertices_number,
-        actual_ztop_layer,
-        local_layer_back,
-        cell_vertex_velocity_back);
-
-    vec3 current_point_vel_up_back = MOPS::CUDAKernel::CalcVelocity(
-        current_cell_vertices_idx,
-        current_cell_vertex_weight,
-        MAX_VERTEX_NUM,
-        current_cell_vertices_number,
-        actual_ztop_layer,
-        local_layer_back - 1,
-        cell_vertex_velocity_back);
-
-    vec3 final_vel_back;
-    final_vel_back.x() = t_back * current_point_vel_up_back.x() + (1.0 - t_back) * current_point_vel_dn_back.x();
-    final_vel_back.y() = t_back * current_point_vel_up_back.y() + (1.0 - t_back) * current_point_vel_dn_back.y();
-    final_vel_back.z() = t_back * current_point_vel_up_back.z() + (1.0 - t_back) * current_point_vel_dn_back.z();
-
-    vec3 current_horizontal_velocity;
-    current_horizontal_velocity.x() = alpha * final_vel_back.x() + (1.0 - alpha) * final_vel_front.x();
-    current_horizontal_velocity.y() = alpha * final_vel_back.y() + (1.0 - alpha) * final_vel_front.y();
-    current_horizontal_velocity.z() = alpha * final_vel_back.z() + (1.0 - alpha) * final_vel_front.z();
-
-    int dn_if_front = local_layer_front;
-    int up_if_front = (local_layer_front > 0) ? (local_layer_front - 1) : 0;
-    int dn_if_back = local_layer_back;
-    int up_if_back = (local_layer_back > 0) ? (local_layer_back - 1) : 0;
-
-    double w_dn_front = MOPS::CUDAKernel::CalcAttribute(
-        current_cell_vertices_idx,
-        current_cell_vertex_weight,
-        MAX_VERTEX_NUM,
-        current_cell_vertices_number,
-        actual_ztop_layer_p1,
-        dn_if_front,
-        cell_vertex_vert_velocity_front);
-    double w_up_front = MOPS::CUDAKernel::CalcAttribute(
-        current_cell_vertices_idx,
-        current_cell_vertex_weight,
-        MAX_VERTEX_NUM,
-        current_cell_vertices_number,
-        actual_ztop_layer_p1,
-        up_if_front,
-        cell_vertex_vert_velocity_front);
-    double w_front = t_front * w_up_front + (1.0 - t_front) * w_dn_front;
-
-    double w_dn_back = MOPS::CUDAKernel::CalcAttribute(
-        current_cell_vertices_idx,
-        current_cell_vertex_weight,
-        MAX_VERTEX_NUM,
-        current_cell_vertices_number,
-        actual_ztop_layer_p1,
-        dn_if_back,
-        cell_vertex_vert_velocity_back);
-    double w_up_back = MOPS::CUDAKernel::CalcAttribute(
-        current_cell_vertices_idx,
-        current_cell_vertex_weight,
-        MAX_VERTEX_NUM,
-        current_cell_vertices_number,
-        actual_ztop_layer_p1,
-        up_if_back,
-        cell_vertex_vert_velocity_back);
-    double w_back = t_back * w_up_back + (1.0 - t_back) * w_dn_back;
-
-    double current_vertical_velocity = alpha * w_back + (1.0 - alpha) * w_front;
-
-    vec3 current_point_attr_value = {0.0, 0.0, 0.0};
-    if (has_double_attributes) {
-        if (attr_count >= 1 && attr0_front != nullptr && attr0_back != nullptr) {
-            double attr_dn_front = MOPS::CUDAKernel::CalcAttribute(
-                current_cell_vertices_idx,
-                current_cell_vertex_weight,
-                MAX_VERTEX_NUM,
-                current_cell_vertices_number,
-                actual_ztop_layer,
-                local_layer_front,
-                attr0_front);
-            double attr_up_front = MOPS::CUDAKernel::CalcAttribute(
-                current_cell_vertices_idx,
-                current_cell_vertex_weight,
-                MAX_VERTEX_NUM,
-                current_cell_vertices_number,
-                actual_ztop_layer,
-                local_layer_front - 1,
-                attr0_front);
-            double attr_front = t_front * attr_up_front + (1.0 - t_front) * attr_dn_front;
-
-            double attr_dn_back = MOPS::CUDAKernel::CalcAttribute(
-                current_cell_vertices_idx,
-                current_cell_vertex_weight,
-                MAX_VERTEX_NUM,
-                current_cell_vertices_number,
-                actual_ztop_layer,
-                local_layer_back,
-                attr0_back);
-            double attr_up_back = MOPS::CUDAKernel::CalcAttribute(
-                current_cell_vertices_idx,
-                current_cell_vertex_weight,
-                MAX_VERTEX_NUM,
-                current_cell_vertices_number,
-                actual_ztop_layer,
-                local_layer_back - 1,
-                attr0_back);
-            double attr_back = t_back * attr_up_back + (1.0 - t_back) * attr_dn_back;
-
-            current_point_attr_value.x() = alpha * attr_back + (1.0 - alpha) * attr_front;
-        }
-
-        if (attr_count >= 2 && attr1_front != nullptr && attr1_back != nullptr) {
-            double attr_dn_front = MOPS::CUDAKernel::CalcAttribute(
-                current_cell_vertices_idx,
-                current_cell_vertex_weight,
-                MAX_VERTEX_NUM,
-                current_cell_vertices_number,
-                actual_ztop_layer,
-                local_layer_front,
-                attr1_front);
-            double attr_up_front = MOPS::CUDAKernel::CalcAttribute(
-                current_cell_vertices_idx,
-                current_cell_vertex_weight,
-                MAX_VERTEX_NUM,
-                current_cell_vertices_number,
-                actual_ztop_layer,
-                local_layer_front - 1,
-                attr1_front);
-            double attr_front = t_front * attr_up_front + (1.0 - t_front) * attr_dn_front;
-
-            double attr_dn_back = MOPS::CUDAKernel::CalcAttribute(
-                current_cell_vertices_idx,
-                current_cell_vertex_weight,
-                MAX_VERTEX_NUM,
-                current_cell_vertices_number,
-                actual_ztop_layer,
-                local_layer_back,
-                attr1_back);
-            double attr_up_back = MOPS::CUDAKernel::CalcAttribute(
-                current_cell_vertices_idx,
-                current_cell_vertex_weight,
-                MAX_VERTEX_NUM,
-                current_cell_vertices_number,
-                actual_ztop_layer,
-                local_layer_back - 1,
-                attr1_back);
-            double attr_back = t_back * attr_up_back + (1.0 - t_back) * attr_dn_back;
-
-            current_point_attr_value.y() = alpha * attr_back + (1.0 - alpha) * attr_front;
-        }
-    }
-
-    return {current_horizontal_velocity, current_vertical_velocity, current_point_attr_value, true};
-}
 
 // Wrapper function: Calculate velocity with edge projection constraint for stuck particles
-MOPS_DEVICE inline PathlineVelocityState CalcVelocityAtPathlineWithConstraintsCUDA(
-    const vec3& pos,
-    int cell_id,
-    double current_depth,
-    double alpha,
-    int actual_max_edge_size,
-    int actual_vertex_size,
-    int actual_ztop_layer,
-    int actual_ztop_layer_p1,
-    bool has_double_attributes,
-    int attr_count,
-    const size_t* number_vertex_on_cell,
-    const size_t* vertices_on_cell,
-    const vec3* vertex_coord,
-    const vec3* cell_vertex_velocity_front,
-    const vec3* cell_vertex_velocity_back,
-    const double* cell_vertex_ztop_front,
-    const double* cell_vertex_ztop_back,
-    const double* cell_vertex_vert_velocity_front,
-    const double* cell_vertex_vert_velocity_back,
-    const double* attr0_front,
-    const double* attr1_front,
-    const double* attr0_back,
-    const double* attr1_back)
-{
-    // Calculate velocity normally
-    PathlineVelocityState state = CalcVelocityAtPathlineCUDA(
-        pos,
-        cell_id,
-        current_depth,
-        alpha,
-        actual_max_edge_size,
-        actual_vertex_size,
-        actual_ztop_layer,
-        actual_ztop_layer_p1,
-        has_double_attributes,
-        attr_count,
-        number_vertex_on_cell,
-        vertices_on_cell,
-        vertex_coord,
-        cell_vertex_velocity_front,
-        cell_vertex_velocity_back,
-        cell_vertex_ztop_front,
-        cell_vertex_ztop_back,
-        cell_vertex_vert_velocity_front,
-        cell_vertex_vert_velocity_back,
-        attr0_front,
-        attr1_front,
-        attr0_back,
-        attr1_back);
 
-    if (!state.ok) {
-        return state;
-    }
-
-    // Apply edge projection constraint for stuck particles
-    constexpr double VELOCITY_THRESHOLD = 1e-9;
-    double speed = MOPS_LENGTH(state.h_vel);
-
-    if (speed < VELOCITY_THRESHOLD && speed > 1e-20) {  // Very small but non-zero
-        // Find nearest edge
-        int edge_va_idx = -1;
-        int edge_vb_idx = -1;
-        FindNearestCellEdgeCUDA(
-            pos,
-            cell_id,
-            actual_max_edge_size,
-            number_vertex_on_cell,
-            vertices_on_cell,
-            vertex_coord,
-            edge_va_idx,
-            edge_vb_idx);
-
-        if (edge_va_idx >= 0 && edge_vb_idx >= 0) {
-            vec3 va = vertex_coord[edge_va_idx];
-            vec3 vb = vertex_coord[edge_vb_idx];
-
-            // Project velocity onto edge
-            vec3 projected_vel = ProjectVelocityOntoEdgeCUDA(state.h_vel, pos, va, vb);
-            state.h_vel = projected_vel;
-        }
-    }
-
-    return state;
-}
-
-__global__ void KernelPathLine(
-    int particle_count,
-    int each_points_size,
-    int n_steps,
-    int simulation_duration,
-    int record_t,
-    int delta_t,
-    bool use_euler,
-    int actual_cell_size,
-    int actual_max_edge_size,
-    int actual_vertex_size,
-    int actual_ztop_layer,
-    int actual_ztop_layer_p1,
-    bool has_double_attributes,
-    int attr_count,
-    const int* default_cell_id,
-    vec3* sample_points,
-    vec3* write_points,
-    vec3* write_vels,
-    vec3* write_attrs,
-    float* particle_depths,
-    const vec3* vertex_coord,
-    const vec3* cell_coord,
-    const size_t* number_vertex_on_cell,
-    const size_t* vertices_on_cell,
-    const size_t* cells_on_cell,
-    const vec3* cell_vertex_velocity_front,
-    const vec3* cell_vertex_velocity_back,
-    const double* cell_vertex_ztop_front,
-    const double* cell_vertex_ztop_back,
-    const double* cell_vertex_vert_velocity_front,
-    const double* cell_vertex_vert_velocity_back,
-    const double* attr0_front,
-    const double* attr1_front,
-    const double* attr0_back,
-    const double* attr1_back,
-    int* boundary_hit_count)
-{
-    const int global_id = static_cast<int>(blockIdx.x) * blockDim.x + threadIdx.x;
-    if (global_id >= particle_count || each_points_size <= 0 || n_steps <= 0) {
-        return;
-    }
-
-    // Initialize boundary hit counter for this particle
-    if (boundary_hit_count != nullptr) {
-        boundary_hit_count[global_id] = 0;
-    }
-
-    constexpr int MAX_VERTEX_NUM = 10;
-    constexpr int MAX_CELL_NEIGHBOR_NUM = 11;
-
-    double run_time = 0.0;
-    bool first_loop = true;
-    bool first_vel = true;
-    bool first_attr = true;
-
-    int base_idx = global_id * each_points_size;
-    int update_points_idx = 0;
-
-    vec3 sample_point_position;
-    vec3 new_position;
-    int cell_id = -1;
-    int current_cell_vertices_number = 0;  // Declare here to be accessible throughout the loop
-    int cell_neig_vec[MAX_CELL_NEIGHBOR_NUM];
-
-    for (int i = 0; i < MAX_CELL_NEIGHBOR_NUM; ++i) {
-        cell_neig_vec[i] = -1;
-    }
-
-    for (int i_step = 0; i_step < n_steps; ++i_step) {
-        double alpha = static_cast<double>(i_step) / static_cast<double>(n_steps);
-        run_time += delta_t;
-        (void)run_time;
-
-        sample_point_position = sample_points[global_id];
-        int first_cell_id = default_cell_id[global_id];
-        double current_depth = -1.0 * static_cast<double>(particle_depths[global_id]);
-
-        if (first_loop) {
-            first_loop = false;
-            cell_id = first_cell_id;
-            if (cell_id < 0 || cell_id >= actual_cell_size) {
-                return;
-            }
-
-            current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
-            MOPS::CUDAKernel::GetCellNeighborsIdx(
-                cell_id,
-                current_cell_vertices_number,
-                cell_neig_vec,
-                MAX_VERTEX_NUM,
-                actual_max_edge_size,
-                cells_on_cell);
-            write_points[base_idx] = sample_point_position;
-        } else {
-            if (cell_id < 0 || cell_id >= actual_cell_size) {
-                return;
-            }
-
-            current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
-            double max_len = 1e300;
-            for (int idx = 0; idx < current_cell_vertices_number + 1; ++idx) {
-                int cid = cell_neig_vec[idx];
-                if (cid < 0 || cid >= actual_cell_size) {
-                    continue;
-                }
-                vec3 p = cell_coord[cid];
-                double len = MOPS_LENGTH(p - sample_point_position);
-                if (len < max_len) {
-                    max_len = len;
-                    cell_id = cid;
-                }
-            }
-
-            // BUG FIX: Update vertex count after cell_id changed
-            // Must match new cell's vertex count, not old cell's
-            current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
-
-            MOPS::CUDAKernel::GetCellNeighborsIdx(
-                cell_id,
-                current_cell_vertices_number,
-                cell_neig_vec,
-                MAX_VERTEX_NUM,
-                actual_max_edge_size,
-                cells_on_cell);
-        }
-
-        vec3 current_position = sample_point_position;
-        double r = MOPS_LENGTH(current_position);
-        vec3 rk4_next_position = current_position;
-        vec3 current_horizontal_velocity = {0.0, 0.0, 0.0};
-        double current_vertical_velocity = 0.0;
-        vec3 current_attrs = {0.0, 0.0, 0.0};
-
-        if (use_euler) {
-            PathlineVelocityState s = CalcVelocityAtPathlineWithConstraintsCUDA(
-                current_position,
-                cell_id,
-                current_depth,
-                alpha,
-                actual_max_edge_size,
-                actual_vertex_size,
-                actual_ztop_layer,
-                actual_ztop_layer_p1,
-                has_double_attributes,
-                attr_count,
-                number_vertex_on_cell,
-                vertices_on_cell,
-                vertex_coord,
-                cell_vertex_velocity_front,
-                cell_vertex_velocity_back,
-                cell_vertex_ztop_front,
-                cell_vertex_ztop_back,
-                cell_vertex_vert_velocity_front,
-                cell_vertex_vert_velocity_back,
-                attr0_front,
-                attr1_front,
-                attr0_back,
-                attr1_back);
-
-            current_horizontal_velocity = s.h_vel;
-            current_vertical_velocity = s.v_vel;
-            current_attrs = s.attr;
-        } else {
-            const double dt = static_cast<double>(delta_t);
-            const double dalpha = dt / static_cast<double>(simulation_duration);
-
-            double a1 = alpha;
-            PathlineVelocityState s1 = CalcVelocityAtPathlineWithConstraintsCUDA(
-                current_position,
-                cell_id,
-                current_depth,
-                a1,
-                actual_max_edge_size,
-                actual_vertex_size,
-                actual_ztop_layer,
-                actual_ztop_layer_p1,
-                has_double_attributes,
-                attr_count,
-                number_vertex_on_cell,
-                vertices_on_cell,
-                vertex_coord,
-                cell_vertex_velocity_front,
-                cell_vertex_velocity_back,
-                cell_vertex_ztop_front,
-                cell_vertex_ztop_back,
-                cell_vertex_vert_velocity_front,
-                cell_vertex_vert_velocity_back,
-                attr0_front,
-                attr1_front,
-                attr0_back,
-                attr1_back);
-
-            // PERTURBATION: Add random velocity if speed is too low (k1 stage)
-            constexpr double VEL_THRESH = 1e-4;      // 0.1 mm/s
-            constexpr double SIGMA_H = 0.01;         // 1 cm/s horizontal
-            constexpr double SIGMA_V = 0.00001;      // 0.01 mm/s vertical
-
-            double s1_h_mag = MOPS_LENGTH(s1.h_vel);
-            if (s1_h_mag < VEL_THRESH) {
-                vec3 perturb_h = GenerateRandomTangentVelocityCUDA(
-                    current_position, global_id, i_step * 4 + 1, SIGMA_H);
-                s1.h_vel = s1.h_vel + perturb_h;
-            }
-            if (fabs(s1.v_vel) < VEL_THRESH) {
-                float r1 = random_float(global_id, i_step * 4 + 1, 10);
-                float r2 = random_float(global_id, i_step * 4 + 1, 20);
-                s1.v_vel += SIGMA_V * (r1 - 0.5 + r2 - 0.5);
-            }
-
-            vec3 p2 = AdvectOnSphereCUDA(current_position, s1.h_vel, dt * 0.5);
-            double a2 = a1 + 0.5 * dalpha;
-            if (a2 > 1.0) a2 = 1.0;
-            if (a2 < 0.0) a2 = 0.0;
-            PathlineVelocityState s2 = CalcVelocityAtPathlineWithConstraintsCUDA(
-                p2,
-                cell_id,
-                current_depth,
-                a2,
-                actual_max_edge_size,
-                actual_vertex_size,
-                actual_ztop_layer,
-                actual_ztop_layer_p1,
-                has_double_attributes,
-                attr_count,
-                number_vertex_on_cell,
-                vertices_on_cell,
-                vertex_coord,
-                cell_vertex_velocity_front,
-                cell_vertex_velocity_back,
-                cell_vertex_ztop_front,
-                cell_vertex_ztop_back,
-                cell_vertex_vert_velocity_front,
-                cell_vertex_vert_velocity_back,
-                attr0_front,
-                attr1_front,
-                attr0_back,
-                attr1_back);
-
-            // PERTURBATION: Add random velocity if speed is too low (k2 stage)
-            double s2_h_mag = MOPS_LENGTH(s2.h_vel);
-            if (s2_h_mag < VEL_THRESH) {
-                vec3 perturb_h = GenerateRandomTangentVelocityCUDA(
-                    p2, global_id, i_step * 4 + 2, SIGMA_H);
-                s2.h_vel = s2.h_vel + perturb_h;
-            }
-            if (fabs(s2.v_vel) < VEL_THRESH) {
-                float r1 = random_float(global_id, i_step * 4 + 2, 10);
-                float r2 = random_float(global_id, i_step * 4 + 2, 20);
-                s2.v_vel += SIGMA_V * (r1 - 0.5 + r2 - 0.5);
-            }
-
-            vec3 p3 = AdvectOnSphereCUDA(current_position, s2.h_vel, dt * 0.5);
-            double a3 = a1 + 0.5 * dalpha;
-            if (a3 > 1.0) a3 = 1.0;
-            if (a3 < 0.0) a3 = 0.0;
-            PathlineVelocityState s3 = CalcVelocityAtPathlineWithConstraintsCUDA(
-                p3,
-                cell_id,
-                current_depth,
-                a3,
-                actual_max_edge_size,
-                actual_vertex_size,
-                actual_ztop_layer,
-                actual_ztop_layer_p1,
-                has_double_attributes,
-                attr_count,
-                number_vertex_on_cell,
-                vertices_on_cell,
-                vertex_coord,
-                cell_vertex_velocity_front,
-                cell_vertex_velocity_back,
-                cell_vertex_ztop_front,
-                cell_vertex_ztop_back,
-                cell_vertex_vert_velocity_front,
-                cell_vertex_vert_velocity_back,
-                attr0_front,
-                attr1_front,
-                attr0_back,
-                attr1_back);
-
-            // PERTURBATION: Add random velocity if speed is too low (k3 stage)
-            double s3_h_mag = MOPS_LENGTH(s3.h_vel);
-            if (s3_h_mag < VEL_THRESH) {
-                vec3 perturb_h = GenerateRandomTangentVelocityCUDA(
-                    p3, global_id, i_step * 4 + 3, SIGMA_H);
-                s3.h_vel = s3.h_vel + perturb_h;
-            }
-            if (fabs(s3.v_vel) < VEL_THRESH) {
-                float r1 = random_float(global_id, i_step * 4 + 3, 10);
-                float r2 = random_float(global_id, i_step * 4 + 3, 20);
-                s3.v_vel += SIGMA_V * (r1 - 0.5 + r2 - 0.5);
-            }
-
-            vec3 p4 = AdvectOnSphereCUDA(current_position, s3.h_vel, dt);
-            double a4 = a1 + dalpha;
-            if (a4 > 1.0) a4 = 1.0;
-            if (a4 < 0.0) a4 = 0.0;
-            PathlineVelocityState s4 = CalcVelocityAtPathlineWithConstraintsCUDA(
-                p4,
-                cell_id,
-                current_depth,
-                a4,
-                actual_max_edge_size,
-                actual_vertex_size,
-                actual_ztop_layer,
-                actual_ztop_layer_p1,
-                has_double_attributes,
-                attr_count,
-                number_vertex_on_cell,
-                vertices_on_cell,
-                vertex_coord,
-                cell_vertex_velocity_front,
-                cell_vertex_velocity_back,
-                cell_vertex_ztop_front,
-                cell_vertex_ztop_back,
-                cell_vertex_vert_velocity_front,
-                cell_vertex_vert_velocity_back,
-                attr0_front,
-                attr1_front,
-                attr0_back,
-                attr1_back);
-
-            // PERTURBATION: Add random velocity if speed is too low (k4 stage)
-            double s4_h_mag = MOPS_LENGTH(s4.h_vel);
-            if (s4_h_mag < VEL_THRESH) {
-                vec3 perturb_h = GenerateRandomTangentVelocityCUDA(
-                    p4, global_id, i_step * 4 + 4, SIGMA_H);
-                s4.h_vel = s4.h_vel + perturb_h;
-            }
-            if (fabs(s4.v_vel) < VEL_THRESH) {
-                float r1 = random_float(global_id, i_step * 4 + 4, 10);
-                float r2 = random_float(global_id, i_step * 4 + 4, 20);
-                s4.v_vel += SIGMA_V * (r1 - 0.5 + r2 - 0.5);
-            }
-
-            current_horizontal_velocity = (s1.h_vel + 2.0 * s2.h_vel + 2.0 * s3.h_vel + s4.h_vel) / 6.0;
-            current_attrs = (s1.attr + 2.0 * s2.attr + 2.0 * s3.attr + s4.attr) / 6.0;
-            current_vertical_velocity = (s1.v_vel + 2.0 * s2.v_vel + 2.0 * s3.v_vel + s4.v_vel) / 6.0;
-
-            // BUG FIX: RK4 should use spherical rotation, same as Euler
-            // Old method was: x_trial = pos + vel*dt, then normalize (Cartesian + project)
-            // New method: spherical rotation along great circle (geometrically consistent)
-            vec3 rotation_axis = MOPS::CUDAKernel::CalcRotationAxis(current_position, current_horizontal_velocity);
-            double speed = MOPS_LENGTH(current_horizontal_velocity);
-            double theta_rad = (speed * dt) / r;
-            rk4_next_position = MOPS::CUDAKernel::CalcPositionAfterRotation(current_position, rotation_axis, theta_rad);
-        }
-
-        if (use_euler) {
-            vec3 rotation_axis = MOPS::CUDAKernel::CalcRotationAxis(current_position, current_horizontal_velocity);
-            double speed = MOPS_LENGTH(current_horizontal_velocity);
-            double theta_rad = (speed * delta_t) / r;
-            new_position = MOPS::CUDAKernel::CalcPositionAfterRotation(current_position, rotation_axis, theta_rad);
-        } else {
-            new_position = rk4_next_position;
-        }
-
-        if (first_vel) {
-            first_vel = false;
-            write_vels[base_idx] = current_horizontal_velocity;
-        }
-        if (first_attr && has_double_attributes) {
-            first_attr = false;
-            write_attrs[base_idx] = current_attrs;
-        }
-
-        // ========================================================================
-        // VERTICAL BOUNDARY CONDITIONS
-        // (Section 7 of pathline_cuda_summary.md - EXACT IMPLEMENTATION)
-        // ========================================================================
-
-        // Store the tentative horizontal position (already computed by Euler/RK4)
-        vec3 new_position_raw = new_position;
-        double old_depth = static_cast<double>(particle_depths[global_id]);
-
-        // STEP 1: Compute bottom clearance at time t in CURRENT cell
-        // (Section 7.3, lines 617-628)
-        double bottom_ztop_t = CalcZTopAtBottomCUDA(
-            current_position,  // ← At time t, in CURRENT cell
-            cell_id,           // ← CURRENT cell
-            actual_max_edge_size,
-            actual_vertex_size,
-            actual_ztop_layer,
-            number_vertex_on_cell,
-            vertices_on_cell,
-            vertex_coord,
-            cell_vertex_ztop_front);
-
-        double bottom_depth_t = -bottom_ztop_t;
-        double d = bottom_depth_t - old_depth;  // Clearance from bottom
-        d = fmax(d, 0.0);  // Ensure non-negative
-
-        // STEP 2: Compute tentative depth from vertical velocity
-        // (Section 7.3, line 638)
-        double new_depth_raw = old_depth - current_vertical_velocity * static_cast<double>(delta_t);
-
-        // STEP 3: SURFACE BOUNDARY PROJECTION
-        // (Section 7.2, lines 487-505)
-
-        // 3a: Evaluate surface level at tentative horizontal position
-        double surface_ztop = CalcZTopAtLevel0CUDA(
-            new_position_raw,  // ← Tentative NEW horizontal position
-            cell_id,
-            actual_max_edge_size,
-            actual_vertex_size,
-            actual_ztop_layer,
-            number_vertex_on_cell,
-            vertices_on_cell,
-            vertex_coord,
-            cell_vertex_ztop_front);
-
-        double surface_depth = -surface_ztop;
-
-        // 3b: Apply surface projection
-        double new_depth = new_depth_raw;
-        if (new_depth_raw < surface_depth) {
-            new_depth = surface_depth;
-        }
-        new_depth = fmax(new_depth, 0.0);
-
-        // STEP 4: BOTTOM BOUNDARY PROJECTION (BOTTOM-FOLLOWING)
-        // (Section 7.3, lines 641-667)
-
-        // 4a: Find which cell contains the tentative horizontal position
-        int tentative_cell = FindContainingCellInCurrentOrNeighborsCUDA(
-            new_position_raw,
-            cell_id,
-            actual_max_edge_size,
-            number_vertex_on_cell,
-            cells_on_cell,
-            vertices_on_cell,
-            vertex_coord);
-
-        int target_cell_for_bottom = (tentative_cell >= 0) ? tentative_cell : cell_id;
-
-        // 4b: Evaluate bottom depth at NEW horizontal position in TARGET cell
-        double bottom_ztop_next = CalcZTopAtBottomCUDA(
-            new_position_raw,      // ← Tentative NEW horizontal position
-            target_cell_for_bottom, // ← TARGET cell
-            actual_max_edge_size,
-            actual_vertex_size,
-            actual_ztop_layer,
-            number_vertex_on_cell,
-            vertices_on_cell,
-            vertex_coord,
-            cell_vertex_ztop_front);
-
-        double bottom_depth_next = -bottom_ztop_next;
-
-        // 4c: Bottom-following projection - preserve clearance d
-        if (new_depth > bottom_depth_next) {
-            new_depth = bottom_depth_next - d;
-        }
-
-        // STEP 5: Final clamping to keep particle in water column
-        // (Section 7.3, lines 670-671)
-        new_depth = fmax(new_depth, surface_depth);
-        new_depth = fmin(new_depth, bottom_depth_next);
-
-        // STEP 6: Project position to match adjusted depth
-        // (Section 7.2 line 500, Section 7.3 lines 674-678)
-        // "Keep the tentative horizontal movement, but update the radial/depth position"
-        new_position = ProjectPositionToDepth(
-            new_position_raw,
-            new_depth,
-            old_depth,
-            r);
-
-        // Store corrected depth
-        particle_depths[global_id] = static_cast<float>(new_depth);
-
-        // Get the new radius from the adjusted position
-        // This is needed for lateral boundary handling below
-        double r_new = MOPS_LENGTH(new_position);
-
-        // CRITICAL FIX: Check if position is in current cell OR neighbor cells
-        // This distinguishes normal cell crossing from true boundary hits
-        int containing_cell = FindContainingCellInCurrentOrNeighborsCUDA(
-            new_position,
-            cell_id,
-            actual_max_edge_size,
-            number_vertex_on_cell,
-            cells_on_cell,
-            vertices_on_cell,
-            vertex_coord);
-
-        if (containing_cell >= 0) {
-            // Normal case: position is in current cell or neighbor cell
-            if (containing_cell != cell_id) {
-                // Cell crossing - update cell_id and vertex count
-                cell_id = containing_cell;
-                current_cell_vertices_number = static_cast<int>(number_vertex_on_cell[cell_id]);
-
-                // Update neighbor list for new cell
-                MOPS::CUDAKernel::GetCellNeighborsIdx(
-                    cell_id,
-                    current_cell_vertices_number,
-                    cell_neig_vec,
-                    MAX_VERTEX_NUM,
-                    actual_max_edge_size,
-                    cells_on_cell);
-            }
-            // Position is valid, no boundary handling needed
-        } else {
-            // Truly outside mesh (hit land/boundary) - apply boundary projection
-            if (boundary_hit_count != nullptr) {
-                atomicAdd(&boundary_hit_count[global_id], 1);
-            }
-
-            #ifdef __CUDA_ARCH__
-            // Print detailed info for debugging (limit output to avoid spam)
-            if (i_step < 5 || (i_step % 100 == 0)) {
-                printf("🌊 Particle %d: Boundary hit at step %d, cell %d\n",
-                       global_id, i_step, cell_id);
-            }
-            #endif
-
-            // Find nearest edge of current cell
-            int edge_va_idx = -1;
-            int edge_vb_idx = -1;
-            FindNearestCellEdgeCUDA(
-                current_position,
-                cell_id,
-                actual_max_edge_size,
-                number_vertex_on_cell,
-                vertices_on_cell,
-                vertex_coord,
-                edge_va_idx,
-                edge_vb_idx);
-
-            if (edge_va_idx >= 0 && edge_vb_idx >= 0) {
-                vec3 va = vertex_coord[edge_va_idx];
-                vec3 vb = vertex_coord[edge_vb_idx];
-
-                // Project velocity onto boundary edge
-                vec3 projected_vel = ProjectVelocityOntoEdgeCUDA(
-                    current_horizontal_velocity,
-                    current_position,
-                    va,
-                    vb);
-
-                double original_speed = MOPS_LENGTH(current_horizontal_velocity);
-                double projected_speed = MOPS_LENGTH(projected_vel);
-
-                #ifdef __CUDA_ARCH__
-                if (i_step < 5 || (i_step % 100 == 0)) {
-                    printf("  → Edge (%d,%d): speed %.6f → %.6f (%.1f%% retained)\n",
-                           edge_va_idx, edge_vb_idx,
-                           original_speed, projected_speed,
-                           original_speed > 1e-12 ? 100.0 * projected_speed / original_speed : 0.0);
-                }
-                #endif
-
-                // Recalculate position moving along the boundary edge
-                vec3 rotation_axis = MOPS::CUDAKernel::CalcRotationAxis(
-                    current_position,
-                    projected_vel);
-                double theta_rad = (projected_speed * delta_t) / r;
-
-                vec3 candidate_position = MOPS::CUDAKernel::CalcPositionAfterRotation(
-                    current_position,
-                    rotation_axis,
-                    theta_rad);
-
-                // Rescale with same radius
-                double candidate_len = MOPS_LENGTH(candidate_position);
-                if (candidate_len > 1e-12) {
-                    candidate_position = (candidate_position / candidate_len) * r_new;
-                }
-
-                // CRITICAL: Verify the projected position is still in valid mesh
-                bool projected_is_valid = MOPS::CUDAKernel::IsInMesh(
-                    cell_id,
-                    actual_max_edge_size,
-                    candidate_position,
-                    number_vertex_on_cell,
-                    vertices_on_cell,
-                    vertex_coord);
-
-                if (projected_is_valid) {
-                    // Projection successful - use new position
-                    new_position = candidate_position;
-                    #ifdef __CUDA_ARCH__
-                    if (i_step < 5 || (i_step % 100 == 0)) {
-                        printf("  ✓ Projected position validated (in mesh)\n");
-                    }
-                    #endif
-                } else {
-                    // Projection failed - try multiple random directions to prevent stagnation
-                    #ifdef __CUDA_ARCH__
-                    if (i_step < 5 || (i_step % 100 == 0)) {
-                        printf("  ⚠️  Projected position INVALID - trying multiple random directions\n");
-                    }
-                    #endif
-
-                    vec3 escaped_position;
-                    double used_kick_speed = 0.0;
-                    bool escape_successful = TryMultipleRandomDirectionsCUDA(
-                        current_position,
-                        cell_id,
-                        global_id,
-                        i_step,
-                        r,
-                        r_new,
-                        delta_t,
-                        actual_max_edge_size,
-                        number_vertex_on_cell,
-                        vertices_on_cell,
-                        vertex_coord,
-                        escaped_position,
-                        used_kick_speed);
-
-                    if (escape_successful) {
-                        new_position = escaped_position;
-                        #ifdef __CUDA_ARCH__
-                        if (i_step < 5 || (i_step % 100 == 0)) {
-                            printf("  🎲 Random escape successful (speed=%.6f m/s)\n", used_kick_speed);
-                        }
-                        #endif
-                    } else {
-                        // All random directions failed - particle truly trapped
-                        // Keep current position (safe, doesn't produce NaN)
-                        new_position = current_position;
-                        #ifdef __CUDA_ARCH__
-                        if (i_step < 5 || (i_step % 100 == 0)) {
-                            printf("  ⛔ Particle trapped after 20 attempts\n");
-                        }
-                        #endif
-                    }
-                }
-            } else {
-                // Edge detection failed - try multiple random directions
-                #ifdef __CUDA_ARCH__
-                if (i_step < 5 || (i_step % 100 == 0)) {
-                    printf("  ⚠️  Edge detection FAILED - trying multiple random directions\n");
-                }
-                #endif
-
-                vec3 escaped_position;
-                double used_kick_speed = 0.0;
-                bool escape_successful = TryMultipleRandomDirectionsCUDA(
-                    current_position,
-                    cell_id,
-                    global_id,
-                    i_step,
-                    r,
-                    r_new,
-                    delta_t,
-                    actual_max_edge_size,
-                    number_vertex_on_cell,
-                    vertices_on_cell,
-                    vertex_coord,
-                    escaped_position,
-                    used_kick_speed);
-
-                if (escape_successful) {
-                    new_position = escaped_position;
-                    #ifdef __CUDA_ARCH__
-                    if (i_step < 5 || (i_step % 100 == 0)) {
-                        printf("  🎲 Random escape successful (speed=%.6f m/s)\n", used_kick_speed);
-                    }
-                    #endif
-                } else {
-                    // All random directions failed - particle truly trapped
-                    // Keep current position (safe, doesn't produce NaN)
-                    new_position = current_position;
-                    #ifdef __CUDA_ARCH__
-                    if (i_step < 5 || (i_step % 100 == 0)) {
-                        printf("  ⛔ Particle trapped after 20 attempts\n");
-                    }
-                    #endif
-                }
-            }
-        }
-
-        sample_points[global_id] = new_position;
-
-        int record_stride = record_t / delta_t;
-        if (record_stride != 0 && ((i_step + 1) % record_stride) == 0) {
-            int write_idx = base_idx + update_points_idx;
-            if (write_idx >= 0 && write_idx < ((global_id + 1) * each_points_size)) {
-                write_points[write_idx] = new_position;
-                write_vels[write_idx] = current_horizontal_velocity;
-                if (has_double_attributes) {
-                    write_attrs[write_idx] = current_attrs;
-                }
-            }
-            update_points_idx += 1;
-        }
-    }
-}
 
 std::vector<TrajectoryLine> PathLine(
     MPASOField* mpasoF,
@@ -3149,20 +1559,28 @@ std::vector<TrajectoryLine> PathLine(
     const int actual_ztop_layer_p1 = static_cast<int>(grid_info_vec[5]);
 
     // Collect attribute pointers from CtoV (vertex-interpolated) data
+    // IMPORTANT: Collect in specific order (temperature, salinity) to match TrajectoryCommon.h expectations
+    // where a.x() is temperature and a.y() is salinity
     std::vector<const std::vector<double>*> front_attr_ptrs;
     std::vector<const std::vector<double>*> back_attr_ptrs;
 
-    for (const auto& kv : mpasoF->mSol_Front->mDoubleAttributes_CtoV) {
-        front_attr_ptrs.push_back(&kv.second);
-        if (front_attr_ptrs.size() == 2) {
-            break;
-        }
+    // attr0 = temperature, attr1 = salinity (explicit order)
+    auto front_temp_it = mpasoF->mSol_Front->mDoubleAttributes_CtoV.find("temperature");
+    auto front_sal_it = mpasoF->mSol_Front->mDoubleAttributes_CtoV.find("salinity");
+    auto back_temp_it = mpasoF->mSol_Back->mDoubleAttributes_CtoV.find("temperature");
+    auto back_sal_it = mpasoF->mSol_Back->mDoubleAttributes_CtoV.find("salinity");
+
+    if (front_temp_it != mpasoF->mSol_Front->mDoubleAttributes_CtoV.end()) {
+        front_attr_ptrs.push_back(&front_temp_it->second);
     }
-    for (const auto& kv : mpasoF->mSol_Back->mDoubleAttributes_CtoV) {
-        back_attr_ptrs.push_back(&kv.second);
-        if (back_attr_ptrs.size() == 2) {
-            break;
-        }
+    if (front_sal_it != mpasoF->mSol_Front->mDoubleAttributes_CtoV.end()) {
+        front_attr_ptrs.push_back(&front_sal_it->second);
+    }
+    if (back_temp_it != mpasoF->mSol_Back->mDoubleAttributes_CtoV.end()) {
+        back_attr_ptrs.push_back(&back_temp_it->second);
+    }
+    if (back_sal_it != mpasoF->mSol_Back->mDoubleAttributes_CtoV.end()) {
+        back_attr_ptrs.push_back(&back_sal_it->second);
     }
 
     int attr_count = static_cast<int>(front_attr_ptrs.size());
@@ -3191,6 +1609,16 @@ std::vector<TrajectoryLine> PathLine(
     size_t* d_number_vertex_on_cell = DeviceAllocAndCopy(mpasoF->mGrid->numberVertexOnCell_vec, "cudaMalloc/cudaMemcpy path numberVertexOnCell");
     size_t* d_vertices_on_cell = DeviceAllocAndCopy(mpasoF->mGrid->verticesOnCell_vec, "cudaMalloc/cudaMemcpy path verticesOnCell");
     size_t* d_cells_on_cell = DeviceAllocAndCopy(mpasoF->mGrid->cellsOnCell_vec, "cudaMalloc/cudaMemcpy path cellsOnCell");
+
+    int* d_max_level_cell = nullptr;
+    if (!mpasoF->mGrid->maxLevelCell_vec.empty()) {
+        d_max_level_cell = DeviceAllocAndCopy(mpasoF->mGrid->maxLevelCell_vec, "cudaMalloc/cudaMemcpy path maxLevelCell");
+    } else {
+        printf("[WARNING] maxLevelCell_vec is empty! Using fallback.\n");
+        // Allocate a dummy array filled with max layer value
+        std::vector<int> dummy_max_level(actual_cell_size, actual_ztop_layer);
+        d_max_level_cell = DeviceAllocAndCopy(dummy_max_level, "cudaMalloc/cudaMemcpy path maxLevelCell (dummy)");
+    }
 
     vec3* d_cell_vertex_velocity_front = DeviceAllocAndCopy(mpasoF->mSol_Front->cellVertexVelocity_vec, "cudaMalloc/cudaMemcpy path cellVertexVelocityFront");
     vec3* d_cell_vertex_velocity_back = DeviceAllocAndCopy(mpasoF->mSol_Back->cellVertexVelocity_vec, "cudaMalloc/cudaMemcpy path cellVertexVelocityBack");
@@ -3245,6 +1673,7 @@ std::vector<TrajectoryLine> PathLine(
         d_number_vertex_on_cell,
         d_vertices_on_cell,
         d_cells_on_cell,
+        d_max_level_cell,
         d_cell_vertex_velocity_front,
         d_cell_vertex_velocity_back,
         d_cell_vertex_ztop_front,
@@ -3255,43 +1684,40 @@ std::vector<TrajectoryLine> PathLine(
         d_attr1_front,
         d_attr0_back,
         d_attr1_back,
-        d_boundary_hit_count);
+        d_boundary_hit_count,
+        config->perturbation_sigma_h,
+        config->perturbation_sigma_v,
+        config->masked_attr_value);
 
     CheckCuda(cudaGetLastError(), "KernelPathLine launch");
     CheckCuda(cudaDeviceSynchronize(), "KernelPathLine sync");
 
-    CheckCuda(
-        cudaMemcpy(
-            update_points.data(),
-            d_write_points,
-            update_points.size() * sizeof(vec3),
-            cudaMemcpyDeviceToHost),
-        "cudaMemcpy path points");
+    CopyDeviceToHost(update_points, d_write_points, "cudaMemcpy path points");
+    CopyDeviceToHost(update_vels, d_write_vels, "cudaMemcpy path velocities");
 
-    CheckCuda(
-        cudaMemcpy(
-            update_vels.data(),
-            d_write_vels,
-            update_vels.size() * sizeof(vec3),
-            cudaMemcpyDeviceToHost),
-        "cudaMemcpy path velocities");
+    // DEBUG: Check for zero velocities
+    {
+        int zero_count = 0;
+        std::vector<int> zero_indices;
+        for (size_t i = 0; i < update_vels.size(); ++i) {
+            double vel_mag = std::sqrt(
+                update_vels[i].x() * update_vels[i].x() +
+                update_vels[i].y() * update_vels[i].y() +
+                update_vels[i].z() * update_vels[i].z()
+            );
+            if (vel_mag < 1e-10) {
+                zero_count++;
+                if (zero_indices.size() < 50) {
+                    zero_indices.push_back(i);
+                }
+            }
+        }
 
-    CheckCuda(
-        cudaMemcpy(
-            update_attrs.data(),
-            d_write_attrs,
-            update_attrs.size() * sizeof(vec3),
-            cudaMemcpyDeviceToHost),
-        "cudaMemcpy path attrs");
+        
+    }
 
-    // Copy boundary hit data back to host
-    CheckCuda(
-        cudaMemcpy(
-            boundary_hit_count_host.data(),
-            d_boundary_hit_count,
-            boundary_hit_count_host.size() * sizeof(int),
-            cudaMemcpyDeviceToHost),
-        "cudaMemcpy path boundary_hit_count");
+    CopyDeviceToHost(update_attrs, d_write_attrs, "cudaMemcpy path attrs");
+    CopyDeviceToHost(boundary_hit_count_host, d_boundary_hit_count, "cudaMemcpy path boundary_hit_count");
 
     FreeDev(d_boundary_hit_count, "cudaFree path boundary_hit_count");
     FreeDev(d_attr1_back, "cudaFree path attr1Back");
@@ -3305,6 +1731,7 @@ std::vector<TrajectoryLine> PathLine(
     FreeDev(d_cell_vertex_velocity_back, "cudaFree path cellVertexVelocityBack");
     FreeDev(d_cell_vertex_velocity_front, "cudaFree path cellVertexVelocityFront");
     FreeDev(d_cells_on_cell, "cudaFree path cellsOnCell");
+    FreeDev(d_max_level_cell, "cudaFree path maxLevelCell");
     FreeDev(d_vertices_on_cell, "cudaFree path verticesOnCell");
     FreeDev(d_number_vertex_on_cell, "cudaFree path numberVertexOnCell");
     FreeDev(d_cell_coord, "cudaFree path cellCoord");

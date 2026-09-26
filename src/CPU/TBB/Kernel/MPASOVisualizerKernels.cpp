@@ -260,9 +260,14 @@ void VisualizeFixedDepth(MPASOField* mpasoF, VisualizationSettings* config, std:
     std::vector<const std::vector<double>*> attr_vec_ptrs;
     if (mpasoF->mSol_Front->mDoubleAttributes.size() > 1) {
         bDoubleAttributes = true;
-        for (const auto& [name, vec] : mpasoF->mSol_Front->mDoubleAttributes_CtoV) {
-            (void)name;
-            attr_vec_ptrs.push_back(&vec);
+        // IMPORTANT: Collect in specific order (temperature, salinity)
+        auto temp_it = mpasoF->mSol_Front->mDoubleAttributes_CtoV.find("temperature");
+        auto sal_it = mpasoF->mSol_Front->mDoubleAttributes_CtoV.find("salinity");
+        if (temp_it != mpasoF->mSol_Front->mDoubleAttributes_CtoV.end()) {
+            attr_vec_ptrs.push_back(&temp_it->second);
+        }
+        if (sal_it != mpasoF->mSol_Front->mDoubleAttributes_CtoV.end()) {
+            attr_vec_ptrs.push_back(&sal_it->second);
         }
     }
 
@@ -996,8 +1001,8 @@ std::vector<TrajectoryLine> StreamLine(
                 if (write_idx >= base_idx && write_idx < base_idx + each_points_size) {
                     update_points[write_idx] = new_position;
                     update_vels[write_idx] = current_horizontal_velocity;
+                    ++update_points_idx;  // Only increment if write succeeded
                 }
-                ++update_points_idx;
             }
         }
     });
@@ -1091,13 +1096,24 @@ std::vector<TrajectoryLine> PathLine(
     std::vector<const std::vector<double>*> attr_front_ptrs;
     std::vector<const std::vector<double>*> attr_back_ptrs;
     if (mpasoF->mSol_Front->mDoubleAttributes.size() > 1) {
-        for (const auto& [name, vec] : mpasoF->mSol_Front->mDoubleAttributes_CtoV) {
-            (void)name;
-            attr_front_ptrs.push_back(&vec);
+        // IMPORTANT: Collect in specific order (temperature, salinity) to match TrajectoryCommon.h expectations
+        // where a.x() is temperature and a.y() is salinity
+        auto front_temp_it = mpasoF->mSol_Front->mDoubleAttributes_CtoV.find("temperature");
+        auto front_sal_it = mpasoF->mSol_Front->mDoubleAttributes_CtoV.find("salinity");
+        auto back_temp_it = mpasoF->mSol_Back->mDoubleAttributes_CtoV.find("temperature");
+        auto back_sal_it = mpasoF->mSol_Back->mDoubleAttributes_CtoV.find("salinity");
+
+        if (front_temp_it != mpasoF->mSol_Front->mDoubleAttributes_CtoV.end()) {
+            attr_front_ptrs.push_back(&front_temp_it->second);
         }
-        for (const auto& [name, vec] : mpasoF->mSol_Back->mDoubleAttributes_CtoV) {
-            (void)name;
-            attr_back_ptrs.push_back(&vec);
+        if (front_sal_it != mpasoF->mSol_Front->mDoubleAttributes_CtoV.end()) {
+            attr_front_ptrs.push_back(&front_sal_it->second);
+        }
+        if (back_temp_it != mpasoF->mSol_Back->mDoubleAttributes_CtoV.end()) {
+            attr_back_ptrs.push_back(&back_temp_it->second);
+        }
+        if (back_sal_it != mpasoF->mSol_Back->mDoubleAttributes_CtoV.end()) {
+            attr_back_ptrs.push_back(&back_sal_it->second);
         }
     }
     const int attr_count = static_cast<int>(std::min(attr_front_ptrs.size(), attr_back_ptrs.size()));
@@ -1476,8 +1492,8 @@ std::vector<TrajectoryLine> PathLine(
                     if (b_double_attributes) {
                         update_attrs[write_idx] = current_attrs;
                     }
+                    ++update_points_idx;  // Only increment if write succeeded
                 }
-                ++update_points_idx;
             }
         }
     });

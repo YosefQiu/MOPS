@@ -77,6 +77,7 @@ namespace MOPS
         std::vector<float>      cellWeight_vec;
 
         std::vector<double>     cellRefBottomDepth_vec;
+        std::vector<int>        maxLevelCell_vec;  // Maximum valid ocean layer index for each cell
 
     public:
         void initGrid(MPASOReader* reader);

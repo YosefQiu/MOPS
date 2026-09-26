@@ -530,12 +530,15 @@ void VisualizeFixedDepth(
     std::vector<int> cell_id_vec(width * height, -1);
     MOPS::HIPKernel::SearchKDTree(cell_id_vec.data(), mpasoF->mGrid.get(), width, height, min_lat, max_lat, min_lon, max_lon);
 
+    // IMPORTANT: Collect in specific order (temperature, salinity)
     std::vector<const std::vector<double>*> attr_ptrs;
-    for (const auto& kv : mpasoF->mSol_Front->mDoubleAttributes_CtoV) {
-        attr_ptrs.push_back(&kv.second);
-        if (attr_ptrs.size() == 2) {
-            break;
-        }
+    auto temp_it = mpasoF->mSol_Front->mDoubleAttributes_CtoV.find("temperature");
+    auto sal_it = mpasoF->mSol_Front->mDoubleAttributes_CtoV.find("salinity");
+    if (temp_it != mpasoF->mSol_Front->mDoubleAttributes_CtoV.end()) {
+        attr_ptrs.push_back(&temp_it->second);
+    }
+    if (sal_it != mpasoF->mSol_Front->mDoubleAttributes_CtoV.end()) {
+        attr_ptrs.push_back(&sal_it->second);
     }
 
     const bool has_attr = (!attr_ptrs.empty()) && (img_vec.size() > 1);
@@ -1300,8 +1303,8 @@ __global__ void KernelStreamLine(
             if (write_idx >= 0 && write_idx < ((global_id + 1) * each_points_size)) {
                 write_points[write_idx] = new_position;
                 write_vels[write_idx] = current_horizontal_velocity;
+                update_points_idx += 1;  // Only increment if write succeeded
             }
-            update_points_idx += 1;
         }
     }
 }
@@ -2149,8 +2152,8 @@ __global__ void KernelPathLine(
                 if (has_double_attributes) {
                     write_attrs[write_idx] = current_attrs;
                 }
+                update_points_idx += 1;  // Only increment if write succeeded
             }
-            update_points_idx += 1;
         }
     }
 }
@@ -2213,17 +2216,24 @@ std::vector<TrajectoryLine> PathLine(
     std::vector<const std::vector<double>*> front_attr_ptrs;
     std::vector<const std::vector<double>*> back_attr_ptrs;
     if (has_double_attributes) {
-        for (const auto& kv : mpasoF->mSol_Front->mDoubleAttributes_CtoV) {
-            front_attr_ptrs.push_back(&kv.second);
-            if (front_attr_ptrs.size() == 2) {
-                break;
-            }
+        // IMPORTANT: Collect in specific order (temperature, salinity) to match TrajectoryCommon.h expectations
+        // where a.x() is temperature and a.y() is salinity
+        auto front_temp_it = mpasoF->mSol_Front->mDoubleAttributes_CtoV.find("temperature");
+        auto front_sal_it = mpasoF->mSol_Front->mDoubleAttributes_CtoV.find("salinity");
+        auto back_temp_it = mpasoF->mSol_Back->mDoubleAttributes_CtoV.find("temperature");
+        auto back_sal_it = mpasoF->mSol_Back->mDoubleAttributes_CtoV.find("salinity");
+
+        if (front_temp_it != mpasoF->mSol_Front->mDoubleAttributes_CtoV.end()) {
+            front_attr_ptrs.push_back(&front_temp_it->second);
         }
-        for (const auto& kv : mpasoF->mSol_Back->mDoubleAttributes_CtoV) {
-            back_attr_ptrs.push_back(&kv.second);
-            if (back_attr_ptrs.size() == 2) {
-                break;
-            }
+        if (front_sal_it != mpasoF->mSol_Front->mDoubleAttributes_CtoV.end()) {
+            front_attr_ptrs.push_back(&front_sal_it->second);
+        }
+        if (back_temp_it != mpasoF->mSol_Back->mDoubleAttributes_CtoV.end()) {
+            back_attr_ptrs.push_back(&back_temp_it->second);
+        }
+        if (back_sal_it != mpasoF->mSol_Back->mDoubleAttributes_CtoV.end()) {
+            back_attr_ptrs.push_back(&back_sal_it->second);
         }
     }
     int attr_count = static_cast<int>(front_attr_ptrs.size());

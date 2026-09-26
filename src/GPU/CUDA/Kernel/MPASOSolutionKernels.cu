@@ -3,16 +3,67 @@
 #include <cuda_runtime.h>
 
 #include "GPU/CUDA/Kernel/CUDAKernel.h"
+#include "GPU/CUDA/Kernel/CUDAMemoryUtils.cuh"  // Unified CUDA memory utilities
 #include "Utils/GeoConverter.hpp"
 #include "Utils/Interpolation.hpp"
+#include "Core/MPASOSolution.h"  // For INVALID_VALUE constants
 
 namespace {
 
-inline void CheckCuda(cudaError_t code, const char* what)
+// Use unified CUDA memory utilities
+using namespace MOPS::GPU::CUDABackend::MemoryUtils;
+
+// Helper device function: Find the nearest valid neighbor cell value
+// Used when a cell has invalid/masked scalar data at a given layer
+__device__ inline double FindNearestValidNeighborValue(
+    size_t cell_id,
+    size_t layer,
+    size_t total_layer,
+    int max_edges_on_cell,
+    const vec3* cell_coord,
+    const size_t* cells_on_cell,
+    const double* cell_center_attr,
+    size_t cells_size)
 {
-    if (code != cudaSuccess) {
-        Error("[CUDA]::%s failed: %s", what, cudaGetErrorString(code));
+    constexpr double INVALID = MOPS::INVALID_VALUE;
+
+    const vec3 cell_pos = cell_coord[cell_id];
+    double min_dist = 1e30;
+    double nearest_value = INVALID;
+
+    // Iterate through neighbors of this cell
+    for (int i = 0; i < max_edges_on_cell; ++i) {
+        const size_t raw_neighbor_id = cells_on_cell[cell_id * max_edges_on_cell + i];
+        if (raw_neighbor_id == 0) {
+            continue;  // No neighbor at this index
+        }
+
+        const size_t neighbor_id = raw_neighbor_id - 1;  // Convert to 0-based
+        if (neighbor_id >= cells_size) {
+            continue;  // Invalid neighbor
+        }
+
+        // Get neighbor's value at the same layer
+        const double neighbor_value = cell_center_attr[neighbor_id * total_layer + layer];
+
+        // Check if neighbor has valid data
+        if (neighbor_value > INVALID + 1.0) {  // Valid (not masked)
+            // Calculate distance from current cell to neighbor
+            const vec3 neighbor_pos = cell_coord[neighbor_id];
+            const double dx = cell_pos.x() - neighbor_pos.x();
+            const double dy = cell_pos.y() - neighbor_pos.y();
+            const double dz = cell_pos.z() - neighbor_pos.z();
+            const double dist = sqrt(dx*dx + dy*dy + dz*dz);
+
+            // Update if this is the nearest valid neighbor so far
+            if (dist < min_dist) {
+                min_dist = dist;
+                nearest_value = neighbor_value;
+            }
+        }
     }
+
+    return nearest_value;  // Returns INVALID if no valid neighbors found
 }
 
 __global__ void KernelCalcCellVertexZtop(
@@ -109,6 +160,8 @@ __global__ void KernelCalcCellCenterToVertex(
     const vec3* vertex_coord,
     const vec3* cell_coord,
     const size_t* cells_on_vertex,
+    const size_t* cells_on_cell,
+    int max_edges_on_cell,
     size_t cells_size,
     size_t vertex_size,
     size_t total_layer,
@@ -150,9 +203,21 @@ __global__ void KernelCalcCellCenterToVertex(
     else if (valid_count == 1) {
         // 1 neighbor: directly copy the neighbor's value
         double value = cell_center_attr[neighbor_cells[0] * total_layer + layer];
-        if (value < 0.0) {
-            value = 0.0;
+
+        // Check if the value is invalid/masked
+        constexpr double INVALID = MOPS::INVALID_VALUE;
+        if (value <= INVALID + 1.0) {
+            // Try to find a valid neighbor for this cell
+            value = FindNearestValidNeighborValue(
+                neighbor_cells[0], layer, total_layer, max_edges_on_cell,
+                cell_coord, cells_on_cell, cell_center_attr, cells_size);
+
+            // If still invalid, set to 0
+            if (value <= INVALID + 1.0) {
+                value = 0.0;
+            }
         }
+
         cell_vertex_attr[tid] = value;
         return;
     }
@@ -174,13 +239,30 @@ __global__ void KernelCalcCellCenterToVertex(
         const double w1 = inv_d1 / sum_inv_d;
         const double w2 = inv_d2 / sum_inv_d;
 
-        const double s1 = cell_center_attr[neighbor_cells[0] * total_layer + layer];
-        const double s2 = cell_center_attr[neighbor_cells[1] * total_layer + layer];
+        double s1 = cell_center_attr[neighbor_cells[0] * total_layer + layer];
+        double s2 = cell_center_attr[neighbor_cells[1] * total_layer + layer];
 
+        // Check and replace invalid values
+        constexpr double INVALID = MOPS::INVALID_VALUE;
+        if (s1 <= INVALID + 1.0) {
+            s1 = FindNearestValidNeighborValue(
+                neighbor_cells[0], layer, total_layer, max_edges_on_cell,
+                cell_coord, cells_on_cell, cell_center_attr, cells_size);
+        }
+        if (s2 <= INVALID + 1.0) {
+            s2 = FindNearestValidNeighborValue(
+                neighbor_cells[1], layer, total_layer, max_edges_on_cell,
+                cell_coord, cells_on_cell, cell_center_attr, cells_size);
+        }
+
+        // Interpolate with (potentially replaced) values
         double value = w1 * s1 + w2 * s2;
-        if (value < 0.0) {
+
+        // If still invalid, set to 0
+        if (value <= INVALID + 1.0) {
             value = 0.0;
         }
+
         cell_vertex_attr[tid] = value;
         return;
     }
@@ -197,14 +279,36 @@ __global__ void KernelCalcCellCenterToVertex(
     double w = 0.0;
     MOPS::Interpolator::calcTriangleBarycentric(p, &tri, u, v, w);
 
-    const double s1 = cell_center_attr[neighbor_cells[0] * total_layer + layer];
-    const double s2 = cell_center_attr[neighbor_cells[1] * total_layer + layer];
-    const double s3 = cell_center_attr[neighbor_cells[2] * total_layer + layer];
+    double s1 = cell_center_attr[neighbor_cells[0] * total_layer + layer];
+    double s2 = cell_center_attr[neighbor_cells[1] * total_layer + layer];
+    double s3 = cell_center_attr[neighbor_cells[2] * total_layer + layer];
 
+    // Check and replace invalid values with nearest valid neighbor
+    constexpr double INVALID = MOPS::INVALID_VALUE;
+    if (s1 <= INVALID + 1.0) {
+        s1 = FindNearestValidNeighborValue(
+            neighbor_cells[0], layer, total_layer, max_edges_on_cell,
+            cell_coord, cells_on_cell, cell_center_attr, cells_size);
+    }
+    if (s2 <= INVALID + 1.0) {
+        s2 = FindNearestValidNeighborValue(
+            neighbor_cells[1], layer, total_layer, max_edges_on_cell,
+            cell_coord, cells_on_cell, cell_center_attr, cells_size);
+    }
+    if (s3 <= INVALID + 1.0) {
+        s3 = FindNearestValidNeighborValue(
+            neighbor_cells[2], layer, total_layer, max_edges_on_cell,
+            cell_coord, cells_on_cell, cell_center_attr, cells_size);
+    }
+
+    // Interpolate with (potentially replaced) values
     double value = u * s1 + v * s2 + w * s3;
-    if (value < 0.0) {
+
+    // If still invalid after replacement, set to 0
+    if (value <= INVALID + 1.0) {
         value = 0.0;
     }
+
     cell_vertex_attr[tid] = value;
 }
 
@@ -502,38 +606,7 @@ __global__ void KernelCalcCellVertexVertVelocity(
     cell_vertex_vert_velocity[tid] = u * s1 + v * s2 + w * s3;
 }
 
-template <typename T>
-T* DeviceAllocAndCopy(const std::vector<T>& src, const char* what)
-{
-    if (src.empty()) {
-        return nullptr;
-    }
-
-    T* dst = nullptr;
-    CheckCuda(cudaMalloc(reinterpret_cast<void**>(&dst), src.size() * sizeof(T)), what);
-    CheckCuda(cudaMemcpy(dst, src.data(), src.size() * sizeof(T), cudaMemcpyHostToDevice), what);
-    return dst;
-}
-
-template <typename T>
-void CopyBackAndFree(std::vector<T>& dst, T* dev_ptr, const char* what)
-{
-    if (dev_ptr == nullptr) {
-        return;
-    }
-    if (!dst.empty()) {
-        CheckCuda(cudaMemcpy(dst.data(), dev_ptr, dst.size() * sizeof(T), cudaMemcpyDeviceToHost), what);
-    }
-    CheckCuda(cudaFree(dev_ptr), what);
-}
-
-template <typename T>
-void FreeDev(T* dev_ptr, const char* what)
-{
-    if (dev_ptr != nullptr) {
-        CheckCuda(cudaFree(dev_ptr), what);
-    }
-}
+// DeviceAllocAndCopy, CopyBackAndFree, FreeDev now provided by CUDAMemoryUtils.cuh
 
 } // namespace
 
@@ -618,9 +691,14 @@ void LaunchCalcCellCenterToVertex(
 
     cell_vertex_attr.assign(vertex_size * total_layer, 0.0);
 
+    // Calculate maxEdges from cellsOnCell array size
+    // cellsOnCell has shape (nCells, maxEdges), so maxEdges = size / nCells
+    const int max_edges_on_cell = static_cast<int>(grid->cellsOnCell_vec.size() / total_cells);
+
     vec3* d_vertex_coord = DeviceAllocAndCopy(grid->vertexCoord_vec, "cudaMalloc/cudaMemcpy vertexCoord");
     vec3* d_cell_coord = DeviceAllocAndCopy(grid->cellCoord_vec, "cudaMalloc/cudaMemcpy cellCoord");
     size_t* d_cells_on_vertex = DeviceAllocAndCopy(grid->cellsOnVertex_vec, "cudaMalloc/cudaMemcpy cellsOnVertex");
+    size_t* d_cells_on_cell = DeviceAllocAndCopy(grid->cellsOnCell_vec, "cudaMalloc/cudaMemcpy cellsOnCell");
     double* d_cell_center_attr = DeviceAllocAndCopy(cell_center_attr, "cudaMalloc/cudaMemcpy cellCenterAttr");
     double* d_cell_vertex_attr = nullptr;
 
@@ -633,6 +711,8 @@ void LaunchCalcCellCenterToVertex(
         d_vertex_coord,
         d_cell_coord,
         d_cells_on_vertex,
+        d_cells_on_cell,
+        max_edges_on_cell,
         total_cells,
         vertex_size,
         total_layer,
@@ -644,6 +724,7 @@ void LaunchCalcCellCenterToVertex(
 
     CopyBackAndFree(cell_vertex_attr, d_cell_vertex_attr, "cudaMemcpy/cudaFree cellVertexAttr");
     FreeDev(d_cell_center_attr, "cudaFree cellCenterAttr");
+    FreeDev(d_cells_on_cell, "cudaFree cellsOnCell");
     FreeDev(d_cells_on_vertex, "cudaFree cellsOnVertex");
     FreeDev(d_cell_coord, "cudaFree cellCoord");
     FreeDev(d_vertex_coord, "cudaFree vertexCoord");

@@ -209,6 +209,7 @@ void MPASOGrid::initGrid(MPASOReader* reader)
     this->cellsOnEdge_vec           = std::move(reader->cellsOnEdge_vec);
     this->edgesOnCell_vec           = std::move(reader->edgesOnCell_vec);
 
+    this->maxLevelCell_vec          = std::move(reader->maxLevelCell_vec);
     this->cellRefBottomDepth_vec    = std::move(reader->cellRefBottomDepth_vec);
 
     auto cachedFileName = reader->mMeshName;
@@ -240,8 +241,11 @@ void MPASOGrid::initGrid(ftk::ndarray_group* g, MPASOReader* reader)
     copyFromNdarray_Int(g, "cellsOnEdge", this->cellsOnEdge_vec);
     copyFromNdarray_Int(g, "edgesOnCell", this->edgesOnCell_vec);
 
-   
-    
+    // Copy maxLevelCell from reader (already loaded in MPASOReader::readGridData)
+    if (reader) {
+        this->maxLevelCell_vec = reader->maxLevelCell_vec;
+    }
+
 }
 
 void MPASOGrid::createKDTree(const char* kdTree_path, sycl::queue& SYCL_Q)

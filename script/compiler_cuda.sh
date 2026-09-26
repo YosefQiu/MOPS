@@ -2,7 +2,7 @@
 
 module load gcc-native/12.3
 module load cudatoolkit/12.4
-module load cray-python/3.11.5
+module load cray-python/3.12.12
 module load cmake/3.30.2
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-${(%):-%x}}")" && pwd)"
@@ -17,7 +17,7 @@ source $SYCL_SCRIPT
 
 module load gcc-native/12.3
 module load cudatoolkit/12.4
-module load cray-python/3.11.5
+module load cray-python/3.12.12
 module load cmake/3.30.2
 
 rm -rf build_cuda && mkdir -p build_cuda

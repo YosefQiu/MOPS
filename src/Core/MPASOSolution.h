@@ -6,6 +6,12 @@
 #include "ndarray/ndarray_group_stream.hh"
 namespace MOPS
 {
+    // Invalid value constants for scalar attributes (temperature, salinity, etc.)
+    // Values below this threshold are considered invalid/masked in source data
+    constexpr double INVALID_VALUE_THRESHOLD = -1e20;
+    // Standardized internal invalid value marker
+    constexpr double INVALID_VALUE = -999.0;
+
     enum class AttributeFormat : int { kDouble, kFloat, kChar, kVec3, kCount };
     enum class AttributeType : int { kZonalVelocity, kMeridionalVelocity, kVelocity, kNormalVelocity, kZTop, kLayerThickness, kBottomDepth, kCount };
     
@@ -108,6 +114,7 @@ namespace MOPS
         bool checkAttribute();
 
         void addAttribute(std::string name, AttributeFormat type);
+        void cleanInvalidCellCenterValues(const std::string& name, MPASOGrid* grid);
         void calcCellCenterZtop();
         void calcCellVertexZtop(MPASOGrid* grid, std::string& dataDir, sycl::queue& q);
         void calcCellCenterToVertex(const std::string& name, const std::vector<double>& vec, MPASOGrid* grid, std::string& dataDir, sycl::queue& q);

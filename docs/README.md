@@ -16,10 +16,10 @@
 - **[Your First Visualization](GETTING_STARTED.md#your-first-visualization)** - Hello World
 
 ### Core Components  
-- **[MPASGrid](MPAS_GRID.md)** - Unstructured mesh structure and spatial indexing
-- **MPASOSolution** - Velocity fields and ocean solution data
-- **MPASOField** - Combined grid and solution interface
-- **MPASOVisualizer** - Visualization and particle tracing
+- **[MPASOGrid](MPAS_GRID.md)** - Unstructured mesh structure and spatial indexing
+- **[MPASOSolution](MPAS_SOLUTION.md)** - Velocity fields and ocean solution data
+- **[MPASOField](MPAS_FIELD.md)** - Combined grid and solution interface
+- **MPASOVisualizer** - Visualization and particle tracing API
 
 ### GPU Implementations
 - **[CUDA Backend](CUDA_IMPLEMENTATION.md)** - NVIDIA GPU acceleration with detailed step-by-step algorithms
@@ -43,18 +43,23 @@ MOPS is a high-performance visualization and particle tracing framework for **MP
 
 All documentation in this directory was created by thoroughly analyzing the actual MOPS source code:
 
-✅ **[CUDA_IMPLEMENTATION.md](CUDA_IMPLEMENTATION.md)** - Detailed step-by-step algorithms for:
-- VisualizeFixedLayer
-- VisualizeFixedDepth  
-- VisualizeFixedLatitude
-- StreamLine (with binary search optimization)
-- PathLine (time-varying fields)
+### Core Data Structures
+✅ **[MPAS_GRID.md](MPAS_GRID.md)** - Complete MPASGrid class documentation  
+✅ **[MPAS_SOLUTION.md](MPAS_SOLUTION.md)** - MPASOSolution with velocity representations and zTop  
+✅ **[MPAS_FIELD.md](MPAS_FIELD.md)** - MPASOField spatial queries and temporal interpolation
 
-✅ **[SYCL_IMPLEMENTATION.md](SYCL_IMPLEMENTATION.md)** - Detailed step-by-step algorithms for SYCL portable GPU code
+### GPU Implementations
+✅ **[CUDA_IMPLEMENTATION.md](CUDA_IMPLEMENTATION.md)** - Detailed CUDA algorithms with:
+- Unified infrastructure (CUDAConstants.cuh, CUDAMemoryUtils.cuh)
+- VisualizeFixedLayer/Depth/Latitude algorithms
+- StreamLine and PathLine particle tracing
+- maxLevelCell clamping and configuration parameters
+- Performance optimization and debugging
 
-✅ **[MPAS_GRID.md](MPAS_GRID.md)** - Complete MPASGrid class documentation
+✅ **[SYCL_IMPLEMENTATION.md](SYCL_IMPLEMENTATION.md)** - SYCL portable GPU algorithms
 
-✅ **[GETTING_STARTED.md](GETTING_STARTED.md)** - Tutorial with working examples
+### Tutorials
+✅ **[GETTING_STARTED.md](GETTING_STARTED.md)** - Complete tutorial with working examples
 
 ---
 

@@ -3,9 +3,195 @@
 #include "Common/TrajectoryCommon.h"
 #include "Utils/Interpolation.hpp"
 #include "Utils/GeoConverter.hpp"
+#include <cmath>
 
 
 using namespace MOPS;
+
+// ============================================================================
+// Vertex Data Quality Validation
+// ============================================================================
+
+namespace {
+
+struct ValidationResult {
+    int zero_count = 0;
+    int nan_count = 0;
+    int unrealistic_count = 0;
+    double min_val = 1e30;
+    double max_val = -1e30;
+};
+
+ValidationResult ValidateVertexData(
+    const std::vector<double>& vertex_data,
+    const std::string& data_name,
+    size_t num_vertices,
+    size_t num_layers,
+    double valid_min = -1e10,
+    double valid_max = 1e10)
+{
+    ValidationResult result;
+
+    for (size_t i = 0; i < vertex_data.size(); i++) {
+        double val = vertex_data[i];
+
+        // Track min/max (excluding NaN)
+        if (!std::isnan(val)) {
+            if (val < result.min_val) result.min_val = val;
+            if (val > result.max_val) result.max_val = val;
+        }
+
+        // Check for NaN
+        if (std::isnan(val)) {
+            result.nan_count++;
+            if (result.nan_count <= 5) {
+                size_t vid = i / num_layers;
+                size_t layer = i % num_layers;
+                printf("  ❌ [%s] Vertex %zu Layer %zu: NaN detected!\n",
+                       data_name.c_str(), vid, layer);
+            }
+            continue;
+        }
+
+        // Check for suspicious zeros
+        if (val == 0.0) {
+            size_t layer = i % num_layers;
+            bool is_ztop = (data_name.find("ZTop") != std::string::npos);
+            // For zTop, 0 is only valid at surface (layer 0)
+            if (!is_ztop || layer > 0) {
+                result.zero_count++;
+                if (result.zero_count <= 5) {
+                    size_t vid = i / num_layers;
+                    printf("  ⚠️  [%s] Vertex %zu Layer %zu: value=0 (suspicious)\n",
+                           data_name.c_str(), vid, layer);
+                }
+            }
+        }
+
+        // Check for values outside valid range
+        if (val < valid_min || val > valid_max) {
+            result.unrealistic_count++;
+            if (result.unrealistic_count <= 5) {
+                size_t vid = i / num_layers;
+                size_t layer = i % num_layers;
+                printf("  ⚠️  [%s] Vertex %zu Layer %zu: %.2f (out of range [%.1f, %.1f])\n",
+                       data_name.c_str(), vid, layer, val, valid_min, valid_max);
+            }
+        }
+    }
+
+    return result;
+}
+
+void PrintValidationSummary(
+    const std::string& data_name,
+    const ValidationResult& result,
+    size_t total_size)
+{
+    printf("\n=== Vertex Data Validation: %s ===\n", data_name.c_str());
+    printf("  Total points: %zu\n", total_size);
+    printf("  Value range:  [%.6f, %.6f]\n", result.min_val, result.max_val);
+
+    printf("  Zero values:  %d", result.zero_count);
+    if (result.zero_count > 0) printf(" ⚠️");
+    printf("\n");
+
+    printf("  NaN values:   %d", result.nan_count);
+    if (result.nan_count > 0) printf(" ❌");
+    printf("\n");
+
+    printf("  Out of range: %d", result.unrealistic_count);
+    if (result.unrealistic_count > 0) printf(" ⚠️");
+    printf("\n");
+
+    if (result.zero_count == 0 && result.nan_count == 0 && result.unrealistic_count == 0) {
+        printf("  ✅ Data quality looks OK\n");
+    } else {
+        printf("  ⚠️  ISSUES DETECTED!\n");
+    }
+    printf("=========================================\n\n");
+}
+
+// Enhanced validation: check if vertex zeros come from cell zeros (land mask)
+void ValidateVertexVsCellData(
+    const std::vector<double>& vertex_data,
+    const std::vector<double>& cell_data,
+    MPASOGrid* grid,
+    const std::string& data_name,
+    size_t num_layers)
+{
+    printf("\n=== Enhanced Validation: %s (Vertex vs Cell) ===\n", data_name.c_str());
+
+    int legitimate_zeros = 0;  // Vertex=0 because all source cells=0 (land)
+    int problematic_zeros = 0; // Vertex=0 but source cells≠0 (interpolation issue)
+    int examples_shown = 0;
+
+    for (size_t vid = 0; vid < grid->vertexCoord_vec.size() && examples_shown < 10; vid++) {
+        for (size_t layer = 0; layer < num_layers; layer++) {
+            size_t vertex_idx = vid * num_layers + layer;
+            double vertex_val = vertex_data[vertex_idx];
+
+            // Only check zero values
+            if (vertex_val != 0.0) continue;
+
+            // Get cells around this vertex (MPAS: 3 cells per vertex)
+            // cellsOnVertex_vec is flat array: [cell0, cell1, cell2] for each vertex
+            bool all_cells_zero = true;
+            bool any_cell_nonzero = false;
+            std::vector<int> cell_ids;
+            std::vector<double> cell_values;
+
+            for (int ci = 0; ci < 3; ci++) {
+                int cell_id = grid->cellsOnVertex_vec[3 * vid + ci] - 1;  // -1: MPAS uses 1-based indexing
+                if (cell_id < 0) continue;  // Invalid cell
+
+                size_t cell_idx = cell_id * num_layers + layer;
+                if (cell_idx >= cell_data.size()) continue;
+
+                double cell_val = cell_data[cell_idx];
+                cell_ids.push_back(cell_id);
+                cell_values.push_back(cell_val);
+
+                if (cell_val != 0.0) {
+                    all_cells_zero = false;
+                    any_cell_nonzero = true;
+                }
+            }
+
+            if (all_cells_zero && cell_values.size() > 0) {
+                // Legitimate: all source cells are also 0 (likely land mask)
+                legitimate_zeros++;
+            } else if (any_cell_nonzero) {
+                // Problematic: vertex=0 but some cells are non-zero
+                problematic_zeros++;
+                if (examples_shown < 10) {
+                    printf("  🔴 Vertex %zu Layer %zu: vertex=0 but source cells have data!\n", vid, layer);
+                    printf("     Source cells: ");
+                    for (size_t i = 0; i < cell_ids.size() && i < cell_values.size(); i++) {
+                        printf("Cell[%d]=%.2f ", cell_ids[i], cell_values[i]);
+                    }
+                    printf("\n");
+                    examples_shown++;
+                }
+            }
+        }
+    }
+
+    printf("  Legitimate zeros (land mask): %d\n", legitimate_zeros);
+    printf("  Problematic zeros (data loss): %d", problematic_zeros);
+    if (problematic_zeros > 0) printf(" 🔴");
+    printf("\n");
+
+    if (problematic_zeros == 0) {
+        printf("  ✅ All zeros are legitimate (source cells also zero)\n");
+    } else {
+        printf("  ⚠️  Found %d vertices with zero despite non-zero source cells!\n", problematic_zeros);
+        printf("     This indicates cell→vertex interpolation issues.\n");
+    }
+    printf("=========================================\n\n");
+}
+
+} // anonymous namespace
 
 template<typename T>
 void writeVertexZTopToFile(const std::vector<T>& vertexZTop_vec, const std::string& filename);
@@ -23,6 +209,16 @@ void MPASOSolution::calcCellVertexZtop(MPASOGrid* grid, std::string& dataDir, co
 
     if (std::filesystem::exists(cell_vertex_ztop_path)) {
         readVertexZTopFromFile<double>(cellVertexZTop_vec, cell_vertex_ztop_path);
+
+        // // Validate cached vertex data
+        // auto result = ValidateVertexData(cellVertexZTop_vec,
+        //                                  "Cell Vertex ZTop (cached)",
+        //                                  grid->vertexCoord_vec.size(),
+        //                                  mTotalZTopLayer,
+        //                                  -7000.0,  // Valid range for ocean depth
+        //                                  100.0);
+        // PrintValidationSummary("Cell Vertex ZTop (cached)", result, cellVertexZTop_vec.size());
+
         return;
     }
 
@@ -39,6 +235,15 @@ void MPASOSolution::calcCellVertexZtop(MPASOGrid* grid, std::string& dataDir, co
     writeVertexZTopToFile<double>(cellVertexZTop_vec, cell_vertex_ztop_path);
     Debug("[MPASOSolution]::Calc Cell Vertex Z Top  = \t [ %d ] \t type = [ float64 ]",
             cellVertexZTop_vec.size());
+
+    // // Validate newly computed vertex data
+    // auto result = ValidateVertexData(cellVertexZTop_vec,
+    //                                  "Cell Vertex ZTop (computed)",
+    //                                  grid->vertexCoord_vec.size(),
+    //                                  mTotalZTopLayer,
+    //                                  -7000.0,  // Valid range for ocean depth
+    //                                  100.0);
+    // PrintValidationSummary("Cell Vertex ZTop (computed)", result, cellVertexZTop_vec.size());
 }
 
 void MPASOSolution::calcCellVertexZtop(MPASOGrid* grid, std::string& dataDir, const GPUContext& ctx)
@@ -50,14 +255,49 @@ void MPASOSolution::calcCellCenterToVertex(const std::string& name, const std::v
 {
     if (vec.empty()) return;
     if (mTotalZTopLayer == 0 || mTotalZTopLayer == -1) mTotalZTopLayer = mVertLevels;
+
+    // Clean invalid cell center values before C2V interpolation
+    // (temperature/salinity)
+    cleanInvalidCellCenterValues(name, grid);
+
+    // Use cleaned data from mDoubleAttributes instead of the input vec parameter
+    // because cleanInvalidCellCenterValues modifies mDoubleAttributes[name]
+    const std::vector<double>& data_to_use = mDoubleAttributes.count(name) ? mDoubleAttributes[name] : vec;
+
     std::vector<double> attr_CtoV_vec;
     attr_CtoV_vec.resize(grid->vertexCoord_vec.size() * mTotalZTopLayer);
 
     auto cell_vertex_attribute_path = dataDir + "/" + "cellVertex" + name + "_vec_"  + std::to_string(mTimesteps) + ".bin";
 
+    // Determine valid range based on attribute name
+    double valid_min = -1e10;
+    double valid_max = 1e10;
+    if (name.find("temperature") != std::string::npos || name.find("Temperature") != std::string::npos) {
+        valid_min = -2.5;  // Below freezing point
+        valid_max = 40.0;  // Max realistic ocean temp
+    } else if (name.find("salinity") != std::string::npos || name.find("Salinity") != std::string::npos) {
+        valid_min = 0.0;   // Fresh water
+        valid_max = 45.0;  // Hypersaline
+    }
+
     if (std::filesystem::exists(cell_vertex_attribute_path)) {
         readVertexZTopFromFile<double>(attr_CtoV_vec, cell_vertex_attribute_path);
         mDoubleAttributes_CtoV[name] = attr_CtoV_vec;
+
+        // // Validate cached attribute data
+        // auto result = ValidateVertexData(attr_CtoV_vec,
+        //                                  "Cell Vertex " + name + " (cached)",
+        //                                  grid->vertexCoord_vec.size(),
+        //                                  mTotalZTopLayer,
+        //                                  valid_min,
+        //                                  valid_max);
+        // PrintValidationSummary("Cell Vertex " + name + " (cached)", result, attr_CtoV_vec.size());
+
+        // // Enhanced validation: check if zeros are from land mask
+        // if (result.zero_count > 0) {
+        //     ValidateVertexVsCellData(attr_CtoV_vec, data_to_use, grid, name, mTotalZTopLayer);
+        // }
+
         return;
     }
 
@@ -66,7 +306,7 @@ void MPASOSolution::calcCellCenterToVertex(const std::string& name, const std::v
         grid,
         mCellsSize,
         mTotalZTopLayer,
-        vec,
+        data_to_use,  // Use cleaned data
         attr_CtoV_vec,
         grid_info_vec,
         ctx);
@@ -75,6 +315,20 @@ void MPASOSolution::calcCellCenterToVertex(const std::string& name, const std::v
     Debug("[MPASOSolution]::Calc Cell Vertex Attribute  = \t [ %d ] \t type = [ float64 ]",
             attr_CtoV_vec.size());
     mDoubleAttributes_CtoV[name] = attr_CtoV_vec;
+
+    // // Validate newly computed attribute data
+    // auto result = ValidateVertexData(attr_CtoV_vec,
+    //                                  "Cell Vertex " + name + " (computed)",
+    //                                  grid->vertexCoord_vec.size(),
+    //                                  mTotalZTopLayer,
+    //                                  valid_min,
+    //                                  valid_max);
+    // PrintValidationSummary("Cell Vertex " + name + " (computed)", result, attr_CtoV_vec.size());
+
+    // // Enhanced validation: check if zeros are from land mask
+    // if (result.zero_count > 0) {
+    //     ValidateVertexVsCellData(attr_CtoV_vec, data_to_use, grid, name, mTotalZTopLayer);
+    // }
 }
 
 void MPASOSolution::calcCellCenterToVertex(const std::string& name, const std::vector<double>& vec, MPASOGrid* grid, std::string& dataDir, const GPUContext& ctx)
@@ -409,31 +663,136 @@ void MPASOSolution::addAttribute(std::string name, AttributeFormat type)
         Debug("[MPASOSolution]::kVec3 is not supported temporarily");
     }
 
-    // Clean invalid values for temperature and salinity
+    // Standardize and clean invalid values for temperature and salinity
+    // Different datasets may use different invalid markers (e.g., -1e30, -9999, NaN)
+    // We standardize all invalid values to a consistent internal marker (INVALID_VALUE)
+    // Then replace invalid cell values with nearest valid neighbor values
     if (name == "temperature" || name == "salinity")
     {
-        const double INVALID_THRESHOLD = -1e30;
-
-        // Clean mDoubleAttributes
+        // Step 1: Standardize invalid markers
         if (mDoubleAttributes.count(name))
         {
             auto& data = mDoubleAttributes[name];
             for (auto& val : data)
             {
-                if (val <= INVALID_THRESHOLD) val = 0.0;
+                // If value is below threshold or NaN, mark as invalid
+                if (val <= INVALID_VALUE_THRESHOLD || std::isnan(val))
+                {
+                    val = INVALID_VALUE;  // Standardized invalid marker
+                }
             }
         }
 
-        // Clean mFloatAttributes
         if (mFloatAttributes.count(name))
         {
             auto& data = mFloatAttributes[name];
             for (auto& val : data)
             {
-                if (val <= static_cast<float>(INVALID_THRESHOLD)) val = 0.0f;
+                if (val <= static_cast<float>(INVALID_VALUE_THRESHOLD) || std::isnan(val))
+                {
+                    val = static_cast<float>(INVALID_VALUE);
+                }
+            }
+        }
+
+        // Step 2: Replace invalid cell center values with nearest valid neighbors
+        // NOTE: This will be done in calcCellCenterToVertex, where grid is available
+        // (Removed cleanInvalidCellCenterValues call from here)
+    }
+}
+
+void MPASOSolution::cleanInvalidCellCenterValues(const std::string& name, MPASOGrid* grid)
+{
+    // This function replaces invalid cell center values with nearest valid neighbor values
+    // Must be called with valid grid (requires cellsOnCell connectivity)
+
+    if (!mDoubleAttributes.count(name)) {
+        return;  // No data to clean
+    }
+
+    if (grid == nullptr || mCellsSize == 0 || mTotalZTopLayer == 0) {
+        Debug("[MPASOSolution]::cleanInvalidCellCenterValues - grid not initialized, skipping");
+        return;
+    }
+
+    auto& data = mDoubleAttributes[name];
+    const size_t nCells = static_cast<size_t>(mCellsSize);
+    const size_t nLayers = static_cast<size_t>(mTotalZTopLayer);
+
+    // Get cellsOnCell connectivity from grid
+    // Format: (nCells, maxEdges), 1-based indexing, 0 means no neighbor
+    const std::vector<size_t>& cells_on_cell = grid->cellsOnCell_vec;
+    const std::vector<vec3>& cell_coord = grid->cellCoord_vec;
+
+    if (cells_on_cell.empty() || cell_coord.empty()) {
+        Debug("[MPASOSolution]::cleanInvalidCellCenterValues - grid data not available");
+        return;
+    }
+
+    const size_t max_edges = cells_on_cell.size() / nCells;
+
+    int replaced_count = 0;
+
+    // Process each cell and layer
+    for (size_t cell_id = 0; cell_id < nCells; ++cell_id) {
+        for (size_t layer = 0; layer < nLayers; ++layer) {
+            const size_t idx = cell_id * nLayers + layer;
+            double& value = data[idx];
+
+            // Check if value is invalid
+            if (value <= INVALID_VALUE + 1.0) {
+                // Find nearest valid neighbor
+                double nearest_value = INVALID_VALUE;
+                double min_dist = 1e30;
+
+                const vec3 cell_pos = cell_coord[cell_id];
+
+                // Search through neighbors
+                for (size_t i = 0; i < max_edges; ++i) {
+                    const size_t raw_neighbor_id = cells_on_cell[cell_id * max_edges + i];
+                    if (raw_neighbor_id == 0) {
+                        continue;  // No neighbor
+                    }
+
+                    const size_t neighbor_id = raw_neighbor_id - 1;  // Convert to 0-based
+                    if (neighbor_id >= nCells) {
+                        continue;  // Invalid
+                    }
+
+                    // Get neighbor's value at same layer
+                    const double neighbor_value = data[neighbor_id * nLayers + layer];
+
+                    // Check if neighbor is valid
+                    if (neighbor_value > INVALID_VALUE + 1.0) {
+                        // Calculate distance
+                        const vec3 neighbor_pos = cell_coord[neighbor_id];
+                        const double dx = cell_pos.x() - neighbor_pos.x();
+                        const double dy = cell_pos.y() - neighbor_pos.y();
+                        const double dz = cell_pos.z() - neighbor_pos.z();
+                        const double dist = std::sqrt(dx*dx + dy*dy + dz*dz);
+
+                        // Update if closer
+                        if (dist < min_dist) {
+                            min_dist = dist;
+                            nearest_value = neighbor_value;
+                        }
+                    }
+                }
+
+                // Replace if found valid neighbor
+                if (nearest_value > INVALID_VALUE + 1.0) {
+                    value = nearest_value;
+                    replaced_count++;
+                } else {
+                    // No valid neighbors found, set to 0
+                    value = 0.0;
+                }
             }
         }
     }
+
+    Debug("[MPASOSolution]::cleanInvalidCellCenterValues - %s: replaced %d invalid values",
+          name.c_str(), replaced_count);
 }
 
 void MPASOSolution::getCellVelocity(const size_t cell_id, const size_t level, std::vector<vec3>& cell_on_velocity, vec3& vel)
@@ -613,6 +972,39 @@ void MPASOSolution::calcCellCenterZtop()
                 z -= layerThickness;
                 cellZTop_vec[i * nVertLevels + j] = z;
             }
+
+            // DEBUG: Print cell 26664 depth and layer thickness
+            // if (i == 26664) {
+            //     printf("\n[CELL DEPTH DEBUG] Cell %zu:\n", i);
+            //     printf("  Total layers: %zu\n", nVertLevels);
+            //     printf("  Layer structure (from surface to bottom):\n");
+            //     printf("  %-6s %-15s %-15s %-15s\n", "Layer", "ZTop (m)", "Thickness (m)", "Status");
+            //     printf("  %s\n", std::string(55, '-').c_str());
+
+            //     for (size_t layer = 0; layer < nVertLevels; ++layer) {
+            //         double ztop = cellZTop_vec[i * nVertLevels + layer];
+            //         double thickness = 0.0;
+            //         if (layer < nVertLevels - 1) {
+            //             double ztop_next = cellZTop_vec[i * nVertLevels + layer + 1];
+            //             thickness = ztop - ztop_next;  // positive value
+            //         } else {
+            //             // Last layer - get thickness from raw data
+            //             getCellLayerThickness(i, layer, cellLayerThickness_vec, thickness);
+            //         }
+
+            //         const char* status = "";
+            //         if (thickness < 1e-6) {
+            //             status = " (MASKED/ZERO)";
+            //         }
+
+            //         printf("  %-6zu %-15.2f %-15.2f%s\n",
+            //                layer, ztop, thickness, status);
+            //     }
+
+            //     double bottom_depth = -cellZTop_vec[i * nVertLevels + nVertLevels - 1];
+            //     printf("\n  Bottom depth: %.2f m\n\n", bottom_depth);
+            // }
+
         }
         else
         {

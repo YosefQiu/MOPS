@@ -51,6 +51,7 @@ namespace MOPS
         std::vector<size_t>     cellsOnEdge_vec;
         std::vector<size_t>     edgesOnCell_vec;
 
+        std::vector<int>        maxLevelCell_vec;  // Maximum valid ocean layer index for each cell
         std::vector<float>      cellWeight_vec;
 		
 

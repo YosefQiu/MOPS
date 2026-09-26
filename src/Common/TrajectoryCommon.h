@@ -45,7 +45,10 @@ inline std::vector<TrajectoryLine> InitTrajectoryLines(const std::vector<vec3>& 
     std::vector<TrajectoryLine> trajectory_lines(stable_points.size());
     tbb::parallel_for(size_t(0), stable_points.size(), [&](size_t i) {
         trajectory_lines[i].lineID = i;
-        trajectory_lines[i].points.push_back(stable_points[i]);
+        // BUG FIX: Do NOT pre-add initial point here
+        // FinalizeTrajectoryLines will add all recorded points (including the first one)
+        // Pre-adding causes points.size() = 32 but velocity.size() = 31
+        // trajectory_lines[i].points.push_back(stable_points[i]);
         trajectory_lines[i].lastPoint = stable_points[i];
         trajectory_lines[i].duration = config->simulationDuration;
         trajectory_lines[i].timestamp = config->deltaT;

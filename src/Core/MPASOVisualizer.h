@@ -97,7 +97,14 @@ namespace MOPS
         std::string fileName;
         CalcDirection directionType = CalcDirection::kForward;
         CalcMethodType methodType = CalcMethodType::kEuler;
-        
+
+        // Velocity perturbation parameters for low-velocity scenarios
+        double perturbation_sigma_h = 0.01;       // Horizontal perturbation (m/s), default 1 cm/s
+        double perturbation_sigma_v = 0.00001;    // Vertical perturbation (m/s), default 0.01 mm/s
+
+        // Masked attribute value for temperature/salinity validation
+        double masked_attr_value = -1e34;         // Value indicating masked/invalid data
+
         // Helper: check if per-particle depths are enabled
         bool hasPerParticleDepths() const { return !particle_depths.empty(); }
     };

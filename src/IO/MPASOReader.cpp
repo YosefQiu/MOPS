@@ -152,6 +152,15 @@ MPASOReader::Ptr MPASOReader::readGridData(const std::string& yaml_path)
     copyFromNdarray_Int(gs.get(), "nEdgesOnCell", reader->numberVertexOnCell_vec);
     copyFromNdarray_Int(gs.get(), "cellsOnEdge", reader->cellsOnEdge_vec);
     copyFromNdarray_Int(gs.get(), "edgesOnCell", reader->edgesOnCell_vec);
+
+    // maxLevelCell is int, but copyFromNdarray_Int expects size_t, so convert
+    std::vector<size_t> maxLevelCell_temp;
+    copyFromNdarray_Int(gs.get(), "maxLevelCell", maxLevelCell_temp);
+    reader->maxLevelCell_vec.resize(maxLevelCell_temp.size());
+    for (size_t i = 0; i < maxLevelCell_temp.size(); ++i) {
+        reader->maxLevelCell_vec[i] = static_cast<int>(maxLevelCell_temp[i]);
+    }
+
     copyFromNdarray_Double(gs.get(), "refBottomDepth", reader->cellRefBottomDepth_vec);
 
     reader->mCellsSize = reader->cellCoord_vec.size();

@@ -260,6 +260,9 @@ PYBIND11_MODULE(pyMOPS, m) {
         .def_readwrite("directionType", &MOPS::TrajectorySettings::directionType)
         .def_readwrite("methodType", &MOPS::TrajectorySettings::methodType)
         .def_readwrite("fileName", &MOPS::TrajectorySettings::fileName)
+        .def_readwrite("perturbation_sigma_h", &MOPS::TrajectorySettings::perturbation_sigma_h)  // Horizontal velocity perturbation
+        .def_readwrite("perturbation_sigma_v", &MOPS::TrajectorySettings::perturbation_sigma_v)  // Vertical velocity perturbation
+        .def_readwrite("masked_attr_value", &MOPS::TrajectorySettings::masked_attr_value)        // Masked attribute value
         .def("hasPerParticleDepths", &MOPS::TrajectorySettings::hasPerParticleDepths);  // NEW: helper method
     
     py::class_<CartesianCoord>(m, "CartesianCoord")

@@ -27,6 +27,8 @@ build*
 .claude
 .claude/*
 TestData
+backup_20260925_183954
+tutorial/45N_lowres_backward.py
 hdf5
 zlib
 tutorial/.data/

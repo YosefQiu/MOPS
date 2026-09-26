@@ -29,18 +29,26 @@
 ### MPASOSolution
 **Purpose**: Stores time-varying ocean state
 
+**Documentation**: [MPAS_SOLUTION.md](MPAS_SOLUTION.md)
+
 **Key Features**:
-- Cell-centered velocity fields
-- Vertex-centered derived fields
+- Cell-centered and vertex-centered velocity fields
+- Vertical coordinate system (zTop)
 - Extensible attributes (temperature, salinity, etc.)
+- Multiple velocity representations (edge-normal, zonal/meridional, 3D Cartesian)
+- Invalid value handling and attribute interpolation
 - File: `src/Core/MPASOSolution.{h,cpp}`
 
 ### MPASOField
 **Purpose**: Combines grid and solution(s)
 
+**Documentation**: [MPAS_FIELD.md](MPAS_FIELD.md)
+
 **Key Features**:
 - Links grid with one or two solutions
-- Supports temporal interpolation
+- Supports temporal interpolation (for PathLine)
+- Spatial queries (cell location, ocean/land detection)
+- Shared pointer resource management
 - File: `src/Core/MPASOField.{h,cpp}`
 
 ### MPASOVisualizer
@@ -62,7 +70,13 @@
 
 **Documentation**: [CUDA_IMPLEMENTATION.md](CUDA_IMPLEMENTATION.md)
 
-**Location**: `src/GPU/CUDA/Kernel/MPASOVisualizerKernels.cu`
+**Location**: `src/GPU/CUDA/Kernel/`
+
+**Unified Infrastructure** (2026-09):
+- **CUDAConstants.cuh**: Unified constant definitions (MAX_VERTEX_NUM, MAX_VERTICAL_LEVELS, etc.)
+- **CUDAMemoryUtils.cuh**: Unified memory management utilities (DeviceAlloc, CopyHostToDevice, etc.)
+- **Eliminates 20+ duplicate constant definitions** with inconsistent values
+- **Centralized error checking** and consistent memory patterns
 
 **Detailed Step-by-Step Algorithms**:
 
